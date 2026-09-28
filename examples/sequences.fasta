@@ -1,0 +1,8 @@
+>repeat-tie
+AAA
+>known-substitution
+ACGTTCGT
+>known-deletion
+ACGACGT
+>invalid-isolated
+ACGTX
