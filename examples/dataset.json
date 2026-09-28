@@ -1,0 +1,8 @@
+{
+  "name": "synthetic-verification",
+  "sequence_type": "dna",
+  "sequences": [
+    {"id": "tandem_match", "sequence": "AAT"},
+    {"id": "bad_symbol", "sequence": "AAN"}
+  ]
+}

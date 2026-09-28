@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bio-seq-platform"
+version = "0.1.0"
+description = "Offline, reproducible small-scale biological sequence alignment"
+requires-python = ">=3.10"
+
+[project.scripts]
+bioseq = "bioseq.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
