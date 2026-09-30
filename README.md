@@ -6,7 +6,9 @@
 
 - 本地 Smith-Waterman（`--mode local`，默认）和 Needleman-Wunsch（`--mode global`）。
 - 支持替换、删除、插入和仿射空位惩罚。
-- 回溯所有等分最优候选；重复区域不会只报告第一个位置。
+- 回溯所有等分最优候选；候选身份由方向和每列原始坐标构成，不按对齐文字去重。
+- DNA/RNA 同时搜索正向查询和反向互补查询；`orientation` 与 `query_strand` 标明候选方向。
+- 每个候选保存 `candidate_id` 和逐列 `coordinates`，空位坐标为 `null`，重复区域和短插缺的多个来源可直接追溯。
 - 非法输入按记录隔离，原因写入同一批次结果，不影响其他序列。
 - 数据集、参考序列、参数和运行结果分别保存为内容寻址 JSON。
 - 同一项目、输入和参数重新运行会得到同一个确定性 `run_id` 并复用已保存结果。
@@ -42,4 +44,4 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - `runs/<run_id>/manifest.json`：该批次的完整追溯信息。
 - `runs/<run_id>/results.json`：每条记录的状态、候选比对、CIGAR 和变异。
 
-坐标为 1 基闭区间；CIGAR 使用 `=` 匹配、`X` 替换、`D` 参考删除、`I` 查询插入。
+坐标为 1 基闭区间；CIGAR 使用 `=` 匹配、`X` 替换、`D` 参考删除、`I` 查询插入。反向互补候选的 `coordinates.query_position` 始终对应原始查询的 1 基坐标。

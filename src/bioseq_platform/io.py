@@ -96,15 +96,23 @@ def dataclass_list(value: Any) -> Any:
 
 def alignment_from_dict(data: dict) -> Alignment:
     return Alignment(
+        candidate_id=data.get(
+            "candidate_id",
+            f"legacy:ref{data['reference_start']}-{data['reference_end']}:query{data['query_start']}-{data['query_end']}",
+        ),
         score=data["score"],
         reference_start=data["reference_start"],
         reference_end=data["reference_end"],
         query_start=data["query_start"],
         query_end=data["query_end"],
+        orientation=data.get("orientation", "forward"),
+        reference_strand=data.get("reference_strand", "+"),
+        query_strand=data.get("query_strand", "+"),
         aligned_reference=data["aligned_reference"],
         aligned_query=data["aligned_query"],
         cigar=data["cigar"],
         variants=tuple(data.get("variants", [])),
+        coordinates=tuple(data.get("coordinates", ())),
     )
 
 

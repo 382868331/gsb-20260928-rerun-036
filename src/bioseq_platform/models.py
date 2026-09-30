@@ -5,6 +5,7 @@ from typing import Literal
 
 SequenceType = Literal["dna", "rna", "protein"]
 AlignmentMode = Literal["local", "global"]
+AlignmentOrientation = Literal["forward", "reverse"]
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ class InvalidRecord:
 
 @dataclass(frozen=True)
 class Alignment:
+    candidate_id: str
     score: int
     reference_start: int
     reference_end: int
@@ -88,7 +90,11 @@ class Alignment:
     aligned_reference: str
     aligned_query: str
     cigar: str
+    orientation: AlignmentOrientation = "forward"
+    reference_strand: str = "+"
+    query_strand: str = "+"
     variants: tuple[dict, ...] = ()
+    coordinates: tuple[dict[str, int | None], ...] = ()
 
 
 @dataclass(frozen=True)
