@@ -107,7 +107,9 @@ class AlignmentPipelineTest(unittest.TestCase):
         parameters = AlignmentParameters(mode="global")
         _, _, results = self._run_against("ACGTACGT", ">sub\nACGTTCGT\n", parameters)
         alignment = results[0].alignments[0]
-        self.assertEqual(results[0].alignment_count, 1)
+        self.assertEqual(results[0].alignment_count, 2)
+        self.assertEqual([item.strand for item in results[0].alignments], ["forward", "reverse"])
+        self.assertTrue(all(item.score == 13 for item in results[0].alignments))
         self.assertEqual(alignment.score, 13)
         self.assertEqual(alignment.cigar, "4=1X3=")
         self.assertEqual(alignment.variants[0]["type"], "substitution")
@@ -121,7 +123,8 @@ class AlignmentPipelineTest(unittest.TestCase):
             parameters,
         )
         deletion, insertion = results
-        self.assertEqual(deletion.alignment_count, 1)
+        self.assertEqual(deletion.alignment_count, 2)
+        self.assertEqual([item.strand for item in deletion.alignments], ["forward", "reverse"])
         self.assertEqual(deletion.alignments[0].cigar, "3=1D4=")
         self.assertEqual(deletion.alignments[0].variants, ({
             "type": "deletion",
@@ -130,12 +133,13 @@ class AlignmentPipelineTest(unittest.TestCase):
             "reference_bases": "T",
         },))
         self.assertEqual(deletion.alignments[0].score, 12)
-        self.assertEqual(insertion.alignment_count, 3)
+        self.assertEqual(insertion.alignment_count, 6)
+        self.assertEqual([item.strand for item in insertion.alignments], ["forward"] * 3 + ["reverse"] * 3)
         self.assertEqual({item.cigar for item in insertion.alignments}, {"5=2I3=", "4=2I4=", "3=2I5="})
         self.assertTrue(all(item.score == 12 for item in insertion.alignments))
-        self.assertEqual([item.variants[0]["after_position"] for item in insertion.alignments], [5, 4, 3])
+        self.assertEqual([item.variants[0]["after_position"] for item in insertion.alignments[:3]], [5, 4, 3])
         self.assertTrue(all(item.variants[0]["type"] == "insertion" for item in insertion.alignments))
-        inserted = {item.variants[0]["after_position"]: item.variants[0]["inserted_bases"] for item in insertion.alignments}
+        inserted = {item.variants[0]["after_position"]: item.variants[0]["inserted_bases"] for item in insertion.alignments[:3]}
         self.assertEqual(inserted, {5: "TA", 4: "AT", 3: "TA"})
 
     def test_invalid_record_is_isolated(self) -> None:
@@ -185,6 +189,68 @@ class AlignmentPipelineTest(unittest.TestCase):
         )
         manifest = store.get_run_manifest(run_id)
         self.assertEqual(manifest["reference"]["sequence"], "AAAA")
+
+    def test_global_reverse_match_uses_reverse_strand(self) -> None:
+        parameters = AlignmentParameters(mode="global")
+        reference = "AAGCT"
+        query = reverse_complement(reference)
+        _, _, results = self._run_against(reference, f">rev\n{query}\n", parameters)
+        result = results[0]
+        self.assertEqual(result.score, 10)
+        self.assertEqual(result.alignment_count, 1)
+        alignment = result.alignments[0]
+        self.assertEqual(alignment.strand, "reverse")
+        self.assertEqual(alignment.cigar, "5=")
+        self.assertEqual(alignment.aligned_reference, alignment.aligned_query)
+        self.assertEqual((alignment.query_start, alignment.query_end), (5, 1))
+        self.assertEqual(alignment.query_coordinates, (5, 4, 3, 2, 1))
+        self.assertEqual(alignment.variants, ())
+
+    def test_global_forward_reverse_tie_keeps_both_strands(self) -> None:
+        parameters = AlignmentParameters(mode="global")
+        _, _, results = self._run_against("AT", ">tie\nAT\n", parameters)
+        result = results[0]
+        self.assertEqual(result.score, 4)
+        self.assertEqual(result.alignment_count, 2)
+        strands = [item.strand for item in result.alignments]
+        self.assertEqual(strands, ["forward", "reverse"])
+        self.assertTrue(all(item.score == 4 for item in result.alignments))
+        forward, reverse = result.alignments
+        self.assertEqual(forward.query_coordinates, (1, 2))
+        self.assertEqual(reverse.query_coordinates, (2, 1))
+        self.assertEqual((reverse.query_start, reverse.query_end), (2, 1))
+
+    def test_global_reverse_with_end_gap_and_length_difference(self) -> None:
+        parameters = AlignmentParameters(mode="global")
+        reference = "GG" + "AAGCT" + "CC"
+        query = reverse_complement("AAGCT")
+        _, _, results = self._run_against(reference, f">rev\n{query}\n", parameters)
+        result = results[0]
+        best = result.alignments[0]
+        self.assertEqual(best.strand, "reverse")
+        self.assertEqual(best.score, 10 + 2 * parameters.scoring.gap_open + 2 * parameters.scoring.gap_extend)
+        self.assertEqual(best.aligned_reference, "GGAAGCTCC")
+        self.assertEqual(best.aligned_query, "--AAGCT--")
+        self.assertEqual(best.reference_coordinates, (1, 2, 3, 4, 5, 6, 7, 8, 9))
+        self.assertEqual(best.query_coordinates, (0, 0, 5, 4, 3, 2, 1, 0, 0))
+        self.assertEqual(best.cigar, "2D5=2D")
+
+    def test_global_reverse_batch_reload_preserves_strand_and_order(self) -> None:
+        parameters = AlignmentParameters(mode="global")
+        reference = "AAGCT"
+        query = reverse_complement(reference)
+        run_id, _, first_results = self._run_against(reference, f">rev\n{query}\n", parameters)
+        store = ProjectStore(self.project)
+        reloaded = store.get_run_results(run_id)
+        first = first_results[0].alignments
+        again = reloaded[0].alignments
+        self.assertEqual(len(first), len(again))
+        self.assertEqual(
+            [(item.strand, item.score, item.query_start, item.query_end, item.query_coordinates, item.cigar) for item in first],
+            [(item.strand, item.score, item.query_start, item.query_end, item.query_coordinates, item.cigar) for item in again],
+        )
+        self.assertEqual(again[0].strand, "reverse")
+        self.assertEqual(again[0].query_coordinates, (5, 4, 3, 2, 1))
 
 
 if __name__ == "__main__":

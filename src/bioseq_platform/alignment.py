@@ -246,11 +246,12 @@ def align_sequences(
     sequence_type: SequenceType = "dna",
 ) -> tuple[list[Alignment], bool]:
     parameters.validate()
-    searches = [("forward", query)]
-    if parameters.mode == "local":
-        for strand in supported_strands(sequence_type):
-            if strand == "reverse":
-                searches.append((strand, reverse_complement(query)))
+    searches = []
+    for strand in supported_strands(sequence_type):
+        if strand == "reverse":
+            searches.append((strand, reverse_complement(query)))
+        else:
+            searches.append((strand, query))
 
     strand_candidates: list[tuple[str, str, int, set]] = []
     overall_best: int | float = 0 if parameters.mode == "local" else float("-inf")
