@@ -97,14 +97,19 @@ def dataclass_list(value: Any) -> Any:
 def alignment_from_dict(data: dict) -> Alignment:
     return Alignment(
         score=data["score"],
+        cigar=data["cigar"],
+        strand=data.get("strand", "forward"),
         reference_start=data["reference_start"],
         reference_end=data["reference_end"],
         query_start=data["query_start"],
         query_end=data["query_end"],
         aligned_reference=data["aligned_reference"],
         aligned_query=data["aligned_query"],
-        cigar=data["cigar"],
         variants=tuple(data.get("variants", [])),
+        reference_coordinates=tuple(data.get("reference_coordinates", ())),
+        query_coordinates=tuple(data.get("query_coordinates", ())),
+        trace_end_reference=data.get("trace_end_reference", data["reference_end"]),
+        trace_end_query=data.get("trace_end_query", data["query_end"]),
     )
 
 

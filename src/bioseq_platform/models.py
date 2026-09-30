@@ -88,7 +88,12 @@ class Alignment:
     aligned_reference: str
     aligned_query: str
     cigar: str
+    strand: str = "forward"
     variants: tuple[dict, ...] = ()
+    reference_coordinates: tuple[int, ...] = ()
+    query_coordinates: tuple[int, ...] = ()
+    trace_end_reference: int = 0
+    trace_end_query: int = 0
 
 
 @dataclass(frozen=True)

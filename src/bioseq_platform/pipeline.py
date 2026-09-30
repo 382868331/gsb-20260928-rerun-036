@@ -38,7 +38,12 @@ def run_batch(store: ProjectStore, *, reference: Reference, valid_records: list[
 
     results: list[SequenceResult] = []
     for record in valid_records:
-        alignments, limited = align_sequences(reference.sequence, record.sequence, parameters)
+        alignments, limited = align_sequences(
+            reference.sequence,
+            record.sequence,
+            parameters,
+            sequence_type=reference.sequence_type,
+        )
         results.append(SequenceResult(
             record_id=record.id,
             status="aligned",

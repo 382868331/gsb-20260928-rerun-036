@@ -43,3 +43,5 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - `runs/<run_id>/results.json`：每条记录的状态、候选比对、CIGAR 和变异。
 
 坐标为 1 基闭区间；CIGAR 使用 `=` 匹配、`X` 替换、`D` 参考删除、`I` 查询插入。
+
+每个候选的身份是其在原始序列上的坐标路径（`reference_coordinates`/`query_coordinates`，gap 列记 0），而非对齐后的文字，因此重复区域中文字相同、来源不同的并列解都会保留。局部比对同时搜索正向与反向互补链，候选带 `strand`（`forward`/`reverse`）标记；反向候选的 `query_start`/`query_end` 与查询坐标按原始（未反向）序列给出。蛋白质只搜索正向。
