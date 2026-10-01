@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from dataclasses import replace
 from pathlib import Path
 
 from .alignment import align_sequences
@@ -69,6 +70,22 @@ def run_batch(store: ProjectStore, *, reference: Reference, valid_records: list[
     }
     store.create_run(batch_id, manifest, results)
     return batch_id, manifest, results
+
+
+def select_alignment(store: ProjectStore, run_id: str, record_id: str, alignment_index: int) -> list[SequenceResult]:
+    results = store.get_run_results(run_id)
+    for index, result in enumerate(results):
+        if result.record_id != record_id:
+            continue
+        if not 0 <= alignment_index < len(result.alignments):
+            raise IndexError(
+                f"alignment index {alignment_index} out of range for record {record_id} "
+                f"({len(result.alignments)} candidates)"
+            )
+        results[index] = replace(result, selected_alignment_index=alignment_index)
+        store.save_run_results(run_id, results)
+        return results
+    raise KeyError(f"record {record_id} not found in run {run_id}")
 
 
 def run_from_files(store: ProjectStore, *, reference_path: str, sequences_path: str, sequence_type: str, parameters: AlignmentParameters) -> tuple[str, dict, list[SequenceResult]]:

@@ -46,43 +46,43 @@ def _operation(reference_char: str, query_char: str) -> str:
     return "=" if reference_char == query_char else "X"
 
 
-def _variants(reference: str, query: str) -> tuple[dict, ...]:
+def _variants(reference: str, query: str, reference_coords: list[int]) -> tuple[dict, ...]:
     variants: list[dict] = []
     index = 0
     reference_position = 0
     while index < len(reference):
         if reference[index] != "-" and query[index] != "-":
+            reference_position = reference_coords[index]
             if reference[index] != query[index]:
                 variants.append({
                     "type": "substitution",
-                    "position": reference_position + 1,
+                    "position": reference_position,
                     "reference_base": reference[index],
                     "alternative_base": query[index],
                 })
-            reference_position += 1
             index += 1
         elif query[index] == "-":
-            start = reference_position + 1
             bases: list[str] = []
+            positions: list[int] = []
             while index < len(reference) and query[index] == "-":
                 bases.append(reference[index])
-                reference_position += 1
+                positions.append(reference_coords[index])
                 index += 1
+            reference_position = positions[-1]
             variants.append({
                 "type": "deletion",
-                "start": start,
-                "end": reference_position,
+                "start": positions[0],
+                "end": positions[-1],
                 "reference_bases": "".join(bases),
             })
         else:
             inserted: list[str] = []
-            after_position = reference_position
             while index < len(reference) and reference[index] == "-":
                 inserted.append(query[index])
                 index += 1
             variants.append({
                 "type": "insertion",
-                "after_position": after_position,
+                "after_position": reference_position,
                 "inserted_bases": "".join(inserted),
             })
     return tuple(variants)
@@ -96,14 +96,27 @@ def _build_alignment(
     end_reference: int,
     end_query: int,
     path: tuple[tuple[int | None, int | None], ...],
+    reference_map: tuple[int, ...] | None = None,
+    rotation_offset: int = 0,
 ) -> Alignment:
     ordered = list(reversed(path))
+    if reference_map is not None:
+        ordered = [
+            (reference_map[ref_index - 1] if ref_index is not None else None, query_index)
+            for ref_index, query_index in ordered
+        ]
+        if end_reference:
+            end_reference = reference_map[end_reference - 1]
     reference_columns = [reference[ref_index - 1] if ref_index is not None else "-" for ref_index, _ in ordered]
     query_columns = [query[query_index - 1] if query_index is not None else "-" for _, query_index in ordered]
     reference_coords = [ref_index if ref_index is not None else 0 for ref_index, _ in ordered]
     query_coords = [query_index if query_index is not None else 0 for _, query_index in ordered]
     reference_aligned_positions = [ref_index for ref_index, _ in ordered if ref_index is not None]
     query_aligned_positions = [query_index for _, query_index in ordered if query_index is not None]
+    wraps = any(
+        later < earlier
+        for earlier, later in zip(reference_aligned_positions, reference_aligned_positions[1:])
+    )
 
     reference_string = "".join(reference_columns)
     query_string = "".join(query_columns)
@@ -122,6 +135,8 @@ def _build_alignment(
     return Alignment(
         score=score,
         strand=strand,
+        rotation_offset=rotation_offset,
+        wraps_reference=wraps,
         reference_start=reference_aligned_positions[0],
         reference_end=reference_aligned_positions[-1],
         query_start=query_start,
@@ -129,7 +144,7 @@ def _build_alignment(
         aligned_reference=reference_string,
         aligned_query=query_string,
         cigar=_compress_cigar(operations),
-        variants=_variants(reference_string, query_string),
+        variants=_variants(reference_string, query_string, reference_coords),
         reference_coordinates=tuple(reference_coords),
         query_coordinates=tuple(original_query_coords),
         trace_end_reference=end_reference,
@@ -246,6 +261,8 @@ def align_sequences(
     sequence_type: SequenceType = "dna",
 ) -> tuple[list[Alignment], bool]:
     parameters.validate()
+    if parameters.topology == "circular":
+        return _align_circular(reference, query, parameters, sequence_type)
     searches = []
     for strand in supported_strands(sequence_type):
         if strand == "reverse":
@@ -286,4 +303,62 @@ def align_sequences(
         )
         for strand, oriented_query, end_reference, end_query, path in selected
     ]
+    return alignments, limited
+
+
+def _align_circular(
+    reference: str,
+    query: str,
+    parameters: AlignmentParameters,
+    sequence_type: SequenceType,
+) -> tuple[list[Alignment], bool]:
+    searches = []
+    for strand in supported_strands(sequence_type):
+        oriented = reverse_complement(query) if strand == "reverse" else query
+        searches.append((strand, oriented))
+
+    strand_candidates: list[tuple[str, str, int, list]] = []
+    overall_best: int | float = 0 if parameters.mode == "local" else float("-inf")
+    for strand, oriented_query in searches:
+        per_rotation: list[tuple[int, int, set]] = []
+        strand_best: int | float = 0 if parameters.mode == "local" else float("-inf")
+        for offset in range(len(reference)):
+            rotated = reference[offset:] + reference[:offset]
+            best_score, candidates = _align_one_strand(rotated, oriented_query, parameters)
+            per_rotation.append((offset, best_score, candidates))
+            if parameters.mode == "global" or best_score > 0:
+                strand_best = max(strand_best, best_score)
+        strand_candidates.append((strand, oriented_query, strand_best, per_rotation))
+        overall_best = max(overall_best, strand_best)
+
+    if parameters.mode == "local" and overall_best <= 0:
+        return [], False
+
+    ordered_candidates: list[tuple[str, str, int, int, int, tuple]] = []
+    for strand, oriented_query, strand_best, per_rotation in strand_candidates:
+        if strand_best != overall_best:
+            continue
+        for offset, best_score, candidates in per_rotation:
+            if best_score != overall_best:
+                continue
+            for end_reference, end_query, path in candidates:
+                ordered_candidates.append((strand, oriented_query, offset, end_reference, end_query, path))
+    ordered_candidates.sort(key=lambda item: (item[0], item[2], item[3], item[4], _path_sort_key(item[5])))
+
+    limited = len(ordered_candidates) > parameters.max_alignments
+    selected = ordered_candidates[:parameters.max_alignments]
+    alignments = []
+    for strand, oriented_query, offset, end_reference, end_query, path in selected:
+        coordinate_map = tuple((position + offset) % len(reference) + 1 for position in range(len(reference)))
+        alignments.append(_build_alignment(
+            reference,
+            oriented_query,
+            overall_best,
+            strand,
+            end_reference,
+            end_query,
+            path,
+            reference_map=coordinate_map,
+            rotation_offset=offset,
+        ))
     return alignments, limited

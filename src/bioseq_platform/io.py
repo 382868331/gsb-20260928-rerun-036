@@ -105,6 +105,8 @@ def alignment_from_dict(data: dict) -> Alignment:
         query_end=data["query_end"],
         aligned_reference=data["aligned_reference"],
         aligned_query=data["aligned_query"],
+        rotation_offset=data.get("rotation_offset", 0),
+        wraps_reference=data.get("wraps_reference", False),
         variants=tuple(data.get("variants", [])),
         reference_coordinates=tuple(data.get("reference_coordinates", ())),
         query_coordinates=tuple(data.get("query_coordinates", ())),
@@ -121,6 +123,7 @@ def result_from_dict(data: dict) -> SequenceResult:
         alignment_count=data["alignment_count"],
         alignments=tuple(alignment_from_dict(item) for item in data.get("alignments", [])),
         alignment_limit_reached=data.get("alignment_limit_reached", False),
+        selected_alignment_index=data.get("selected_alignment_index"),
     )
 
 

@@ -91,3 +91,8 @@ class ProjectStore:
 
     def get_run_results(self, run_id: str) -> list[SequenceResult]:
         return [result_from_dict(item) for item in read_json(self.run_path(run_id) / "results.json")]
+
+    def save_run_results(self, run_id: str, results: list[SequenceResult]) -> None:
+        if not self.run_exists(run_id):
+            raise KeyError(f"unknown run: {run_id}")
+        atomic_write_json(self.run_path(run_id) / "results.json", dataclass_list(results))
