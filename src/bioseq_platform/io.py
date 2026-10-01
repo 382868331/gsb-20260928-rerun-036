@@ -110,6 +110,7 @@ def alignment_from_dict(data: dict) -> Alignment:
         query_coordinates=tuple(data.get("query_coordinates", ())),
         trace_end_reference=data.get("trace_end_reference", data["reference_end"]),
         trace_end_query=data.get("trace_end_query", data["query_end"]),
+        query_rotation=data.get("query_rotation"),
     )
 
 
@@ -121,6 +122,7 @@ def result_from_dict(data: dict) -> SequenceResult:
         alignment_count=data["alignment_count"],
         alignments=tuple(alignment_from_dict(item) for item in data.get("alignments", [])),
         alignment_limit_reached=data.get("alignment_limit_reached", False),
+        selected_alignment=data.get("selected_alignment"),
     )
 
 

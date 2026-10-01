@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     align_parser.add_argument("--sequences", required=True, help="FASTA/JSON/JSONL/CSV sequences")
     align_parser.add_argument("--type", choices=["dna", "rna", "protein"], default="dna")
     align_parser.add_argument("--mode", choices=["local", "global"], default="local")
+    align_parser.add_argument("--topology", choices=["linear", "circular"], default="linear")
     align_parser.add_argument("--match", type=int, default=2)
     align_parser.add_argument("--mismatch", type=int, default=-1)
     align_parser.add_argument("--gap-open", type=int, default=-2)
@@ -31,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser = subparsers.add_parser("show-run", help="print stored run results as JSON")
     show_parser.add_argument("project", help="project directory")
     show_parser.add_argument("run_id", help="run identifier, e.g. run-...")
+
+    select_parser = subparsers.add_parser("select", help="manually choose one tied candidate alignment in a saved run")
+    select_parser.add_argument("project", help="project directory")
+    select_parser.add_argument("run_id", help="run identifier, e.g. run-...")
+    select_parser.add_argument("record_id", help="record identifier inside the run")
+    select_parser.add_argument("alignment_index", type=int, help="1-based candidate index to select")
     return parser
 
 
@@ -47,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             mode=args.mode,
             scoring=Scoring(match=args.match, mismatch=args.mismatch, gap_open=args.gap_open, gap_extend=args.gap_extend),
             max_alignments=args.max_alignments,
+            topology=args.topology,
         )
         run_id, manifest, results = run_from_files(
             store,
@@ -62,6 +70,14 @@ def main(argv: list[str] | None = None) -> int:
             "parameters_id": manifest["parameters_id"],
             "results": dataclass_list(results),
         }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "select":
+        chosen = store.select_alignment(args.run_id, args.record_id, args.alignment_index)
+        print(json.dumps({
+            "run_id": args.run_id,
+            "record_id": args.record_id,
+            "selected_alignment": chosen.selected_alignment,
+        }, ensure_ascii=False))
         return 0
     if args.command == "show-run":
         print(json.dumps({

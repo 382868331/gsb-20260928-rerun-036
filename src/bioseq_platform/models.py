@@ -5,6 +5,7 @@ from typing import Literal
 
 SequenceType = Literal["dna", "rna", "protein"]
 AlignmentMode = Literal["local", "global"]
+Topology = Literal["linear", "circular"]
 
 
 @dataclass(frozen=True)
@@ -28,10 +29,13 @@ class AlignmentParameters:
     mode: AlignmentMode = "local"
     scoring: Scoring = field(default_factory=Scoring)
     max_alignments: int = 100
+    topology: Topology = "linear"
 
     def validate(self) -> None:
         if self.mode not in ("local", "global"):
             raise ValueError("mode must be 'local' or 'global'")
+        if self.topology not in ("linear", "circular"):
+            raise ValueError("topology must be 'linear' or 'circular'")
         self.scoring.validate()
         if self.max_alignments < 1:
             raise ValueError("max_alignments must be positive")
@@ -41,6 +45,7 @@ class AlignmentParameters:
             "mode": self.mode,
             "scoring": asdict(self.scoring),
             "max_alignments": self.max_alignments,
+            "topology": self.topology,
         }
 
     @classmethod
@@ -49,6 +54,7 @@ class AlignmentParameters:
             mode=data["mode"],
             scoring=Scoring(**data["scoring"]),
             max_alignments=data["max_alignments"],
+            topology=data.get("topology", "linear"),
         )
 
 
@@ -94,6 +100,7 @@ class Alignment:
     query_coordinates: tuple[int, ...] = ()
     trace_end_reference: int = 0
     trace_end_query: int = 0
+    query_rotation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -104,3 +111,4 @@ class SequenceResult:
     alignment_count: int
     alignments: tuple[Alignment, ...] = ()
     alignment_limit_reached: bool = False
+    selected_alignment: int | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import asdict
 from pathlib import Path
 
@@ -91,3 +92,22 @@ class ProjectStore:
 
     def get_run_results(self, run_id: str) -> list[SequenceResult]:
         return [result_from_dict(item) for item in read_json(self.run_path(run_id) / "results.json")]
+
+    def select_alignment(self, run_id: str, record_id: str, alignment_index: int) -> SequenceResult:
+        results = self.get_run_results(run_id)
+        updated: list[SequenceResult] = []
+        chosen: SequenceResult | None = None
+        for result in results:
+            if result.record_id != record_id:
+                updated.append(result)
+                continue
+            if not 1 <= alignment_index <= len(result.alignments):
+                raise ValueError(
+                    f"alignment index {alignment_index} out of range 1..{len(result.alignments)} for record {record_id}"
+                )
+            chosen = dataclasses.replace(result, selected_alignment=alignment_index)
+            updated.append(chosen)
+        if chosen is None:
+            raise ValueError(f"unknown record id in run {run_id}: {record_id}")
+        atomic_write_json(self.run_path(run_id) / "results.json", dataclass_list(updated))
+        return chosen
