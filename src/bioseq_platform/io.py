@@ -8,7 +8,15 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .models import Alignment, AlignmentParameters, InvalidRecord, Reference, SequenceRecord, SequenceResult
+from .models import (
+    Alignment,
+    AlignmentParameters,
+    FunctionalRegion,
+    InvalidRecord,
+    Reference,
+    SequenceRecord,
+    SequenceResult,
+)
 
 
 def stable_json(value: Any) -> str:
@@ -82,6 +90,55 @@ def read_sequence_file(path: Path) -> list[dict]:
     if suffix in {".fa", ".fasta", ".fna", ".faa"}:
         return parse_fasta(path)
     raise ValueError(f"unsupported input format: {path.suffix}")
+
+
+def read_annotation_file(path: Path) -> list[FunctionalRegion]:
+    """Read directed functional regions from JSON or a simple TSV.
+
+    TSV columns are ``id start end [strand] [name]`` with 1-based closed
+    coordinates; ``end < start`` marks a region crossing the record start.
+    Lines starting with ``#`` are ignored. JSON accepts either a list of
+    regions or an object with a ``regions`` list.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        data = read_json(path)
+        if isinstance(data, dict):
+            data = data.get("regions", [])
+        if not isinstance(data, list):
+            raise ValueError("annotation JSON must be a list or {'regions': [...]}")
+        regions = [FunctionalRegion.from_dict(item) for item in data]
+    elif suffix in {".tsv", ".bed", ".txt"}:
+        regions = []
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t") if "\t" in line else line.split()
+            if len(fields) < 3:
+                raise ValueError(f"annotation line needs at least id/start/end: {raw_line!r}")
+            identifier, start, end = fields[0], fields[1], fields[2]
+            strand = fields[3] if len(fields) > 3 else "forward"
+            if strand in {"+", "f", "plus"}:
+                strand = "forward"
+            elif strand in {"-", "r", "minus"}:
+                strand = "reverse"
+            name = fields[4] if len(fields) > 4 else ""
+            regions.append(FunctionalRegion(
+                id=identifier,
+                start=int(start),
+                end=int(end),
+                strand=strand,
+                name=name,
+            ))
+    else:
+        raise ValueError(f"unsupported annotation format: {path.suffix}")
+    if not regions:
+        raise ValueError("annotation set contains no regions")
+    identifiers = [region.id for region in regions]
+    if len(identifiers) != len(set(identifiers)):
+        raise ValueError("functional region ids must be unique")
+    return regions
 
 
 def dataclass_list(value: Any) -> Any:

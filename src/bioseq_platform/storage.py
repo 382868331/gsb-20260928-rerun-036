@@ -13,7 +13,14 @@ from .io import (
     write_records,
     write_reference,
 )
-from .models import AlignmentParameters, InvalidRecord, Reference, SequenceRecord, SequenceResult
+from .models import (
+    AlignmentParameters,
+    FunctionalRegion,
+    InvalidRecord,
+    Reference,
+    SequenceRecord,
+    SequenceResult,
+)
 from .validation import normalize_sequence
 
 
@@ -24,9 +31,10 @@ class ProjectStore:
         self.datasets_dir = self.root / "datasets"
         self.parameters_dir = self.root / "parameters"
         self.runs_dir = self.root / "runs"
+        self.annotations_dir = self.root / "annotations"
 
     def initialize(self) -> None:
-        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir]:
+        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.annotations_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         manifest = self.root / "project.json"
         if not manifest.exists():
@@ -96,3 +104,50 @@ class ProjectStore:
         if not self.run_exists(run_id):
             raise KeyError(f"unknown run: {run_id}")
         atomic_write_json(self.run_path(run_id) / "results.json", dataclass_list(results))
+
+    def add_annotation(
+        self,
+        regions: list[FunctionalRegion],
+        *,
+        reference_id: str,
+        annotation_id: str | None = None,
+    ) -> str:
+        for region in regions:
+            region.validate(len(self.get_reference(reference_id).sequence))
+        payload = {
+            "reference_id": reference_id,
+            "regions": [region.to_dict() for region in regions],
+        }
+        identifier = annotation_id or f"ann-{self._content_hash(payload)}"
+        atomic_write_json(self.annotations_dir / f"{identifier}.json", payload)
+        return identifier
+
+    def get_annotation(self, annotation_id: str) -> tuple[str, list[FunctionalRegion]]:
+        data = read_json(self.annotations_dir / f"{annotation_id}.json")
+        return data["reference_id"], [FunctionalRegion.from_dict(item) for item in data["regions"]]
+
+    def annotation_path(self, annotation_id: str) -> Path:
+        return self.annotations_dir / f"{annotation_id}.json"
+
+    def projection_path(self, run_id: str, record_id: str, annotation_id: str) -> Path:
+        return self.run_path(run_id) / "projections" / f"{annotation_id}__{record_id}.json"
+
+    def save_projection(
+        self,
+        run_id: str,
+        record_id: str,
+        annotation_id: str,
+        payload: dict,
+    ) -> None:
+        if not self.run_exists(run_id):
+            raise KeyError(f"unknown run: {run_id}")
+        atomic_write_json(
+            self.projection_path(run_id, record_id, annotation_id),
+            payload,
+        )
+
+    def load_projection(self, run_id: str, record_id: str, annotation_id: str) -> dict | None:
+        path = self.projection_path(run_id, record_id, annotation_id)
+        if not path.exists():
+            return None
+        return read_json(path)

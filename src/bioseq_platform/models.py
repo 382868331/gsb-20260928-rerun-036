@@ -113,3 +113,66 @@ class SequenceResult:
     alignments: tuple[Alignment, ...] = ()
     alignment_limit_reached: bool = False
     selected_alignment_index: int | None = None
+
+
+@dataclass(frozen=True)
+class FunctionalRegion:
+    """A directed interval on the original reference record.
+
+    Coordinates are 1-based closed positions on the original (unrotated)
+    reference. ``start``/``end`` follow the record start, so a region that
+    crosses the record end is represented by ``end < start`` and stays one
+    region. ``strand`` records the biological direction of the annotation
+    (``forward``/``reverse``), independently of the alignment strand.
+    """
+
+    id: str
+    start: int
+    end: int
+    strand: str = "forward"
+    name: str = ""
+    metadata: dict = field(default_factory=dict)
+
+    def validate(self, reference_length: int) -> None:
+        if not self.id:
+            raise ValueError("functional region id must be non-empty")
+        if self.strand not in ("forward", "reverse"):
+            raise ValueError("region strand must be 'forward' or 'reverse'")
+        for label, position in (("start", self.start), ("end", self.end)):
+            if not 1 <= position <= reference_length:
+                raise ValueError(
+                    f"region {self.id} {label} {position} is outside the reference "
+                    f"(length {reference_length})"
+                )
+
+    def member_positions(self, reference_length: int) -> tuple[int, ...]:
+        """Reference positions covered by the region in annotation direction."""
+        self.validate(reference_length)
+        if self.start <= self.end:
+            forward = range(self.start, self.end + 1)
+        else:
+            forward = list(range(self.start, reference_length + 1)) + list(range(1, self.end + 1))
+        if self.strand == "reverse":
+            forward = list(reversed(list(forward)))
+        return tuple(forward)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FunctionalRegion":
+        return cls(
+            id=str(data["id"]),
+            start=int(data["start"]),
+            end=int(data["end"]),
+            strand=data.get("strand", "forward"),
+            name=str(data.get("name", "")),
+            metadata=data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {},
+        )
+
+
+@dataclass(frozen=True)
+class AnnotationSet:
+    regions: tuple[FunctionalRegion, ...]
+    reference_id: str = ""
+    annotation_id: str = ""

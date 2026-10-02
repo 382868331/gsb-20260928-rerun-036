@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .alignment import align_sequences
+from .annotations import project_annotation
 from .io import read_sequence_file, stable_hash
 from .models import AlignmentParameters, InvalidRecord, Reference, SequenceRecord, SequenceResult
 from .storage import ProjectStore
@@ -86,6 +87,143 @@ def select_alignment(store: ProjectStore, run_id: str, record_id: str, alignment
         store.save_run_results(run_id, results)
         return results
     raise KeyError(f"record {record_id} not found in run {run_id}")
+
+
+def annotation_from_file(
+    store: ProjectStore,
+    *,
+    annotation_path: str,
+    reference_id: str,
+    annotation_id: str | None = None,
+) -> str:
+    from .io import read_annotation_file
+
+    store.initialize()
+    regions = read_annotation_file(Path(annotation_path))
+    return store.add_annotation(regions, reference_id=reference_id, annotation_id=annotation_id)
+
+
+def _projection_signature(region_projection: dict) -> dict:
+    """Comparable content of one projected region, excluding bookkeeping."""
+    return {
+        "region_id": region_projection["region_id"],
+        "status": region_projection["status"],
+        "query_range": region_projection["query_range"],
+        "variants": region_projection["variants"],
+    }
+
+
+def build_projections(
+    store: ProjectStore,
+    *,
+    run_id: str,
+    record_id: str,
+    annotation_id: str,
+) -> dict:
+    """Project an annotation under every tied candidate of one record.
+
+    Projections for all interpretations are retained (no automatic impact
+    minimisation). The previous payload, if any, is embedded so old and new
+    projections remain comparable after re-running or re-selecting.
+    """
+    stored_reference_id, regions = store.get_annotation(annotation_id)
+    manifest = store.get_run_manifest(run_id)
+    if stored_reference_id != manifest["reference_id"]:
+        raise ValueError(
+            f"annotation {annotation_id} belongs to reference {stored_reference_id}, "
+            f"but run {run_id} uses {manifest['reference_id']}"
+        )
+    reference_length = len(manifest["reference"]["sequence"])
+    results = store.get_run_results(run_id)
+    result = next((item for item in results if item.record_id == record_id), None)
+    if result is None:
+        raise KeyError(f"record {record_id} not found in run {run_id}")
+
+    candidates = []
+    for index, alignment in enumerate(result.alignments):
+        candidates.append({
+            "alignment_index": index,
+            "strand": alignment.strand,
+            "rotation_offset": alignment.rotation_offset,
+            "wraps_reference": alignment.wraps_reference,
+            "score": alignment.score,
+            "regions": project_annotation(regions, alignment, reference_length),
+        })
+
+    previous = store.load_projection(run_id, record_id, annotation_id)
+    payload = {
+        "run_id": run_id,
+        "record_id": record_id,
+        "annotation_id": annotation_id,
+        "reference_id": stored_reference_id,
+        "selected_alignment_index": result.selected_alignment_index,
+        "candidates": candidates,
+    }
+    if previous is not None:
+        payload["previous"] = {
+            "selected_alignment_index": previous.get("selected_alignment_index"),
+            "candidates": previous.get("candidates", []),
+        }
+    store.save_projection(run_id, record_id, annotation_id, payload)
+    return payload
+
+
+def projection_preview(
+    store: ProjectStore,
+    *,
+    run_id: str,
+    record_id: str,
+    annotation_id: str,
+    target_alignment_index: int,
+) -> dict:
+    """Preview which projected regions change when switching interpretation.
+
+    The stored selection and projection are not modified; callers use
+    ``select_alignment`` followed by ``build_projections`` to adopt the new
+    interpretation while keeping the old payload for comparison.
+    """
+    payload = store.load_projection(run_id, record_id, annotation_id)
+    if payload is None:
+        raise KeyError(
+            f"no projection for annotation {annotation_id} on record {record_id} in run {run_id}"
+        )
+    current_index = payload["selected_alignment_index"]
+    candidates = {item["alignment_index"]: item for item in payload["candidates"]}
+    if target_alignment_index not in candidates:
+        raise IndexError(
+            f"alignment index {target_alignment_index} out of range "
+            f"({len(candidates)} projected candidates)"
+        )
+    if current_index is None:
+        raise ValueError("no interpretation selected yet; use select first")
+    if current_index not in candidates:
+        raise KeyError(f"previously selected candidate {current_index} is no longer available")
+
+    current_regions = {item["region_id"]: item for item in candidates[current_index]["regions"]}
+    target_regions = {item["region_id"]: item for item in candidates[target_alignment_index]["regions"]}
+    changed: list[dict] = []
+    for region_id in sorted(set(current_regions) | set(target_regions)):
+        before = current_regions.get(region_id)
+        after = target_regions.get(region_id)
+        before_signature = _projection_signature(before) if before else None
+        after_signature = _projection_signature(after) if after else None
+        if before_signature != after_signature:
+            changed.append({
+                "region_id": region_id,
+                "before": before_signature,
+                "after": after_signature,
+                "needs_recompute": True,
+            })
+    return {
+        "run_id": run_id,
+        "record_id": record_id,
+        "annotation_id": annotation_id,
+        "current_alignment_index": current_index,
+        "target_alignment_index": target_alignment_index,
+        "changed_region_count": len(changed),
+        "changed_regions": changed,
+        "recompute_required": bool(changed),
+    }
 
 
 def run_from_files(store: ProjectStore, *, reference_path: str, sequences_path: str, sequence_type: str, parameters: AlignmentParameters) -> tuple[str, dict, list[SequenceResult]]:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .io import dataclass_list
 from .models import AlignmentParameters, Scoring
-from .pipeline import run_from_files, select_alignment
+from .pipeline import annotation_from_file, build_projections, projection_preview, run_from_files, select_alignment
 from .storage import ProjectStore
 
 
@@ -37,6 +37,30 @@ def build_parser() -> argparse.ArgumentParser:
     select_parser.add_argument("run_id", help="run identifier")
     select_parser.add_argument("record_id", help="record identifier within the run")
     select_parser.add_argument("index", type=int, help="0-based candidate index to select")
+
+    annotate_parser = subparsers.add_parser("annotate", help="save directed functional regions for a reference")
+    annotate_parser.add_argument("project", help="project directory")
+    annotate_parser.add_argument("--annotation", required=True, help="JSON/TSV functional region file")
+    annotate_parser.add_argument("--reference-id", required=True, help="reference the regions belong to")
+
+    project_parser = subparsers.add_parser("project", help="project an annotation across all alignment interpretations")
+    project_parser.add_argument("project", help="project directory")
+    project_parser.add_argument("run_id", help="run identifier")
+    project_parser.add_argument("record_id", help="record identifier within the run")
+    project_parser.add_argument("annotation_id", help="saved annotation identifier")
+
+    preview_parser = subparsers.add_parser("preview-reselect", help="preview which projections change under another candidate")
+    preview_parser.add_argument("project", help="project directory")
+    preview_parser.add_argument("run_id", help="run identifier")
+    preview_parser.add_argument("record_id", help="record identifier within the run")
+    preview_parser.add_argument("annotation_id", help="saved annotation identifier")
+    preview_parser.add_argument("index", type=int, help="candidate index that may be selected next")
+
+    show_projection_parser = subparsers.add_parser("show-projection", help="print stored annotation projections")
+    show_projection_parser.add_argument("project", help="project directory")
+    show_projection_parser.add_argument("run_id", help="run identifier")
+    show_projection_parser.add_argument("record_id", help="record identifier within the run")
+    show_projection_parser.add_argument("annotation_id", help="saved annotation identifier")
     return parser
 
 
@@ -84,6 +108,44 @@ def main(argv: list[str] | None = None) -> int:
             "selected_alignment_index": args.index,
             "results": dataclass_list(results),
         }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "annotate":
+        annotation_id = annotation_from_file(
+            store,
+            annotation_path=args.annotation,
+            reference_id=args.reference_id,
+        )
+        print(json.dumps({
+            "annotation_id": annotation_id,
+            "reference_id": args.reference_id,
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "project":
+        payload = build_projections(
+            store,
+            run_id=args.run_id,
+            record_id=args.record_id,
+            annotation_id=args.annotation_id,
+        )
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "preview-reselect":
+        preview = projection_preview(
+            store,
+            run_id=args.run_id,
+            record_id=args.record_id,
+            annotation_id=args.annotation_id,
+            target_alignment_index=args.index,
+        )
+        print(json.dumps(preview, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "show-projection":
+        payload = store.load_projection(args.run_id, args.record_id, args.annotation_id)
+        if payload is None:
+            raise SystemExit(
+                f"no projection for annotation {args.annotation_id} on {args.record_id}"
+            )
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     return 2
 
