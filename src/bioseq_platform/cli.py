@@ -6,7 +6,12 @@ from pathlib import Path
 
 from .io import dataclass_list
 from .models import AlignmentParameters, Scoring
-from .pipeline import run_from_files, select_alignment
+from .pipeline import (
+    project_run_record,
+    run_from_files,
+    select_alignment,
+    selection_projection_diff,
+)
 from .storage import ProjectStore
 
 
@@ -37,6 +42,22 @@ def build_parser() -> argparse.ArgumentParser:
     select_parser.add_argument("run_id", help="run identifier")
     select_parser.add_argument("record_id", help="record identifier within the run")
     select_parser.add_argument("index", type=int, help="0-based candidate index to select")
+    select_parser.add_argument("--preview", action="store_true", help="only preview which feature projections would be recomputed")
+    feature_add_parser = subparsers.add_parser("feature-add", help="annotate a directed interval on a reference")
+    feature_add_parser.add_argument("project", help="project directory")
+    feature_add_parser.add_argument("reference_id", help="reference identifier")
+    feature_add_parser.add_argument("--name", required=True, help="feature name")
+    feature_add_parser.add_argument("--start", type=int, required=True, help="1-based start (inclusive)")
+    feature_add_parser.add_argument("--end", type=int, required=True, help="1-based end (inclusive); start > end wraps the origin")
+    feature_add_parser.add_argument("--strand", choices=["+", "-"], default="+")
+    feature_list_parser = subparsers.add_parser("feature-list", help="list features annotated on a reference")
+    feature_list_parser.add_argument("project", help="project directory")
+    feature_list_parser.add_argument("reference_id", help="reference identifier")
+    project_parser = subparsers.add_parser("project", help="project annotated features onto query for each candidate")
+    project_parser.add_argument("project", help="project directory")
+    project_parser.add_argument("run_id", help="run identifier")
+    project_parser.add_argument("record_id", help="record identifier within the run")
+    project_parser.add_argument("--index", type=int, default=None, help="restrict to one 0-based candidate index")
     return parser
 
 
@@ -77,13 +98,35 @@ def main(argv: list[str] | None = None) -> int:
         }, ensure_ascii=False, indent=2))
         return 0
     if args.command == "select":
+        if args.preview:
+            print(json.dumps(selection_projection_diff(store, args.run_id, args.record_id, args.index), ensure_ascii=False, indent=2))
+            return 0
+        preview = selection_projection_diff(store, args.run_id, args.record_id, args.index)
         results = select_alignment(store, args.run_id, args.record_id, args.index)
         print(json.dumps({
             "run_id": args.run_id,
             "record_id": args.record_id,
             "selected_alignment_index": args.index,
+            "features_recomputed": preview["features_to_recompute"],
             "results": dataclass_list(results),
         }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "feature-add":
+        store.initialize()
+        feature = store.add_feature(
+            args.reference_id,
+            name=args.name,
+            start=args.start,
+            end=args.end,
+            strand=args.strand,
+        )
+        print(json.dumps(feature.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "feature-list":
+        print(json.dumps([feature.to_dict() for feature in store.get_features(args.reference_id)], ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "project":
+        print(json.dumps(project_run_record(store, args.run_id, args.record_id, args.index), ensure_ascii=False, indent=2))
         return 0
     return 2
 

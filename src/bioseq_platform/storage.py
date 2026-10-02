@@ -14,6 +14,7 @@ from .io import (
     write_reference,
 )
 from .models import AlignmentParameters, InvalidRecord, Reference, SequenceRecord, SequenceResult
+from .features import Feature
 from .validation import normalize_sequence
 
 
@@ -24,9 +25,10 @@ class ProjectStore:
         self.datasets_dir = self.root / "datasets"
         self.parameters_dir = self.root / "parameters"
         self.runs_dir = self.root / "runs"
+        self.features_dir = self.root / "features"
 
     def initialize(self) -> None:
-        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir]:
+        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.features_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         manifest = self.root / "project.json"
         if not manifest.exists():
@@ -74,6 +76,40 @@ class ProjectStore:
 
     def get_parameters(self, parameters_id: str) -> AlignmentParameters:
         return AlignmentParameters.from_dict(read_json(self.parameters_dir / f"{parameters_id}.json"))
+
+    def _features_path(self, reference_id: str) -> Path:
+        return self.features_dir / f"{reference_id}.json"
+
+    def get_features(self, reference_id: str) -> list[Feature]:
+        path = self._features_path(reference_id)
+        if not path.exists():
+            return []
+        return [Feature.from_dict(item) for item in read_json(path).get("features", [])]
+
+    def save_features(self, reference_id: str, features: list[Feature]) -> None:
+        atomic_write_json(self._features_path(reference_id), {
+            "reference_id": reference_id,
+            "features": [feature.to_dict() for feature in features],
+        })
+
+    def add_feature(self, reference_id: str, *, name: str, start: int, end: int, strand: str = "+", metadata: dict | None = None) -> Feature:
+        reference = self.get_reference(reference_id)
+        feature = Feature(
+            id=f"feat-{stable_hash([reference_id, name, start, end, strand, metadata or {}])[:10]}",
+            reference_id=reference_id,
+            name=name,
+            start=start,
+            end=end,
+            strand=strand,
+            metadata=metadata or {},
+        )
+        feature.positions(len(reference.sequence))
+        features = self.get_features(reference_id)
+        if any(existing.id == feature.id for existing in features):
+            return feature
+        features.append(feature)
+        self.save_features(reference_id, features)
+        return feature
 
     def run_path(self, run_id: str) -> Path:
         return self.runs_dir / run_id

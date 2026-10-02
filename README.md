@@ -54,3 +54,11 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - `wraps_reference` 标记坐标是否跨过记录末尾；跨界的替换/插入缺失在 `variants` 中以原始输入坐标给出。
 - 同一份输入可分别以 `--topology linear` 与 `--topology circular` 运行，得到不同 `run_id`，便于比较两种解释。
 - 人工选定候选：`bioseq select <project> <run_id> <record_id> <index>` 将 `selected_alignment_index` 写回该批次；重新读取后候选顺序、方向和选定起点保持不变。
+
+## 功能区注释与投影
+
+- 用 `bioseq feature-add <project> <reference_id> --name N --start S --end E [--strand +/-]` 在原始参考上标记有方向区间；`start > end` 表示跨过记录起点，该区间始终作为一个整体处理，不会拆成两段。
+- `bioseq project <project> <run_id> <record_id> [--index I]` 在每个并列候选解释下把功能区投影到查询序列：输出 `query_start`/`query_end`（原始查询坐标，`query_wraps_origin` 标记跨界）、`query_strand`、覆盖的参考位置和落在功能区内的变异。所有同分解释各自的投影全部保留，不自动挑选影响最小的一种。
+- 变异归属规则：替换按参考位置判定；缺失与功能区有交集即报告，`covers_feature` 标记是否覆盖整个功能区——覆盖时功能区状态为 `deleted`，不再有对应查询范围；插入 `after_position=p` 仅当 p 与 p+1（环状意义下）都在区间内时记为 `internal`，只沾一边记为 `boundary`，因此边界插入不会在相邻两个功能区里都被算成完整内部变异。
+- 反向互补解释下，投影坐标、方向和区间先后关系都回映到原始输入序列（`query_strand=reverse`，坐标为原始查询坐标）。
+- 改选解释前可用 `bioseq select ... --preview` 查看哪些功能区的投影需要重算（`features_to_recompute`）；正式 `select` 的输出也带 `features_recomputed`。功能区注释按 `reference_id` 保存在 `features/` 下，与批次结果相互独立，改选后旧投影仍可按候选索引重现比较。
