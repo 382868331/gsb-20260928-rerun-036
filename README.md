@@ -62,3 +62,11 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - 变异归属规则：替换按参考位置判定；缺失与功能区有交集即报告，`covers_feature` 标记是否覆盖整个功能区——覆盖时功能区状态为 `deleted`，不再有对应查询范围；插入 `after_position=p` 仅当 p 与 p+1（环状意义下）都在区间内时记为 `internal`，只沾一边记为 `boundary`，因此边界插入不会在相邻两个功能区里都被算成完整内部变异。
 - 反向互补解释下，投影坐标、方向和区间先后关系都回映到原始输入序列（`query_strand=reverse`，坐标为原始查询坐标）。
 - 改选解释前可用 `bioseq select ... --preview` 查看哪些功能区的投影需要重算（`features_to_recompute`）；正式 `select` 的输出也带 `features_recomputed`。功能区注释按 `reference_id` 保存在 `features/` 下，与批次结果相互独立，改选后旧投影仍可按候选索引重现比较。
+
+## 参考版本链
+
+- 环状参考可以派生连续版本链：`bioseq version-add <project> <reference_id> --op rotate --offset K`、`--op delete --start S --end E`（`start > end` 表示跨起点删除）、`--op insert --after P --bases ACGT`。每个版本把新参考序列存入 `references/`，链记录保存在 `versions/<reference_id>.json`。
+- 同一有方向特征沿每个中间版本逐步追踪：映射输出保留原始跨起点定义（`original`）与分段顺序（`segments` 按特征弧方向排列，跨原点时在原点处分段），而不是只给排序后的位置集合；每个位置带 `source`（`original`/`inserted`）与 `origin` 归属。
+- 部分删除记为 `partially_deleted` 并列出被删单元；特征被整体删除时明确标记 `status=deleted`。插入归属沿用既有规则：两侧都在特征内记 `internal`（插入碱基并入特征并标注来源版本），只沾一边记 `boundary`，不计入特征。
+- `bioseq version-export <project> <reference_id> [--version-index I]` 导出到任一中间版本为止的映射；`bioseq version-undo` 撤回末次解释；`bioseq version-list` 查看整条链。
+- 保存重开后段来源与插入归属保持不变；`bioseq version-verify` 重放各版本操作核对序列，并用直接组合映射与逐版本组合两条路径核对每个特征的坐标与插入位置。

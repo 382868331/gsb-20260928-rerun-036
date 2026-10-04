@@ -26,9 +26,10 @@ class ProjectStore:
         self.parameters_dir = self.root / "parameters"
         self.runs_dir = self.root / "runs"
         self.features_dir = self.root / "features"
+        self.versions_dir = self.root / "versions"
 
     def initialize(self) -> None:
-        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.features_dir]:
+        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.features_dir, self.versions_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         manifest = self.root / "project.json"
         if not manifest.exists():
@@ -110,6 +111,18 @@ class ProjectStore:
         features.append(feature)
         self.save_features(reference_id, features)
         return feature
+
+    def _version_chain_path(self, reference_id: str) -> Path:
+        return self.versions_dir / f"{reference_id}.json"
+
+    def get_version_chain(self, reference_id: str) -> dict:
+        path = self._version_chain_path(reference_id)
+        if not path.exists():
+            return {"root_reference_id": reference_id, "versions": []}
+        return read_json(path)
+
+    def save_version_chain(self, reference_id: str, chain: dict) -> None:
+        atomic_write_json(self._version_chain_path(reference_id), chain)
 
     def run_path(self, run_id: str) -> Path:
         return self.runs_dir / run_id

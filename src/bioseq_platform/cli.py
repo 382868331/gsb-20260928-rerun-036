@@ -13,6 +13,7 @@ from .pipeline import (
     selection_projection_diff,
 )
 from .storage import ProjectStore
+from .versions import add_version, export_mappings, undo_last_version, verify_chain
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,7 +59,41 @@ def build_parser() -> argparse.ArgumentParser:
     project_parser.add_argument("run_id", help="run identifier")
     project_parser.add_argument("record_id", help="record identifier within the run")
     project_parser.add_argument("--index", type=int, default=None, help="restrict to one 0-based candidate index")
+    version_add_parser = subparsers.add_parser("version-add", help="derive a new reference version (rotate/delete/insert) and map features")
+    version_add_parser.add_argument("project", help="project directory")
+    version_add_parser.add_argument("reference_id", help="root reference identifier")
+    version_add_parser.add_argument("--op", choices=["rotate", "delete", "insert"], required=True)
+    version_add_parser.add_argument("--offset", type=int, default=0, help="rotate offset (0-based)")
+    version_add_parser.add_argument("--start", type=int, help="delete start (1-based, inclusive)")
+    version_add_parser.add_argument("--end", type=int, help="delete end (1-based, inclusive); start > end wraps the origin")
+    version_add_parser.add_argument("--after", type=int, help="insert after this 1-based position")
+    version_add_parser.add_argument("--bases", help="inserted bases")
+    version_list_parser = subparsers.add_parser("version-list", help="list the version chain of a reference")
+    version_list_parser.add_argument("project", help="project directory")
+    version_list_parser.add_argument("reference_id", help="root reference identifier")
+    version_export_parser = subparsers.add_parser("version-export", help="export intermediate feature mappings")
+    version_export_parser.add_argument("project", help="project directory")
+    version_export_parser.add_argument("reference_id", help="root reference identifier")
+    version_export_parser.add_argument("--version-index", type=int, default=None, help="export only up to this 0-based version")
+    version_undo_parser = subparsers.add_parser("version-undo", help="withdraw the most recent version interpretation")
+    version_undo_parser.add_argument("project", help="project directory")
+    version_undo_parser.add_argument("reference_id", help="root reference identifier")
+    version_verify_parser = subparsers.add_parser("version-verify", help="check direct composed mapping against per-version composition")
+    version_verify_parser.add_argument("project", help="project directory")
+    version_verify_parser.add_argument("reference_id", help="root reference identifier")
     return parser
+
+
+def _operation_from_args(args: argparse.Namespace) -> dict:
+    if args.op == "rotate":
+        return {"type": "rotate", "offset": args.offset}
+    if args.op == "delete":
+        if args.start is None or args.end is None:
+            raise ValueError("delete operation requires --start and --end")
+        return {"type": "delete", "start": args.start, "end": args.end}
+    if args.after is None or not args.bases:
+        raise ValueError("insert operation requires --after and --bases")
+    return {"type": "insert", "after_position": args.after, "bases": args.bases}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -127,6 +162,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "project":
         print(json.dumps(project_run_record(store, args.run_id, args.record_id, args.index), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "version-add":
+        store.initialize()
+        record = add_version(store, args.reference_id, _operation_from_args(args))
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "version-list":
+        print(json.dumps(export_mappings(store, args.reference_id), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "version-export":
+        print(json.dumps(export_mappings(store, args.reference_id, args.version_index), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "version-undo":
+        removed = undo_last_version(store, args.reference_id)
+        print(json.dumps({"withdrawn": removed, "status": "withdrawn"}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "version-verify":
+        print(json.dumps(verify_chain(store, args.reference_id), ensure_ascii=False, indent=2))
         return 0
     return 2
 
