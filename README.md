@@ -67,7 +67,9 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 
 - `bioseq chain-create <project> <reference_id> [--chain-id ID]` 以原始参考为第 0 版建立连续版本链，保存在 `chains/` 下。
 - `bioseq chain-edit <project> <chain_id> rotate|delete|insert ...` 追加一个新版本：先旋转（`--offset`）再删除（`--start/--end`）或插入（`--after/--bases`），每个版本记录逐位置来源（carried 指向上一版本坐标，inserted 标记产生它的编辑版本与偏移）。
-- `bioseq chain-trace <project> <chain_id> <feature_id> [--version K]` 把原始参考上的有方向特征（允许 `start > end` 跨起点）追到新链的每个中间版本：输出保留原特征定义与分段顺序（`segments` 按特征方向排列，含每段来源坐标），不是排序位置集合；部分删除标记 `partially_deleted` 并列出 `deleted_source_positions`，整体删除明确标记 `deleted`；插入编辑附带 `insertion_impact`（internal/boundary/outside，沿用边界插入归属规则）。`--version K` 只导出到第 K 版的中间映射。
+- `bioseq chain-trace <project> <chain_id> <feature_id> [--version K]` 把原始参考上的有方向特征（允许 `start > end` 跨起点）追到新链的每个中间版本：输出保留原特征定义与分段顺序（`segments` 按特征方向排列，含每段来源），不是排序位置集合；部分删除标记 `partially_deleted` 并列出 `deleted_sources`/`deleted_source_positions`，整体删除明确标记 `deleted`；插入编辑附带 `insertion_impact`（internal/boundary/outside，沿用边界插入归属规则）。`--version K` 只导出到第 K 版的中间映射。
+- 已归属特征的内部插入片段会成为特征成员并在后续版本继续参与映射：每个成员的来源是原子描述符 origin（原始位置来源，字段 position）或 inserted（插入版本来源，字段 edit_version/offset），见每个版本快照的 sources 与各分段的 sources/source_positions（插入碱基在后者记 null）。后续旋转保持成员的方向顺序，后续删除若落在插入片段上会在 deleted_sources 里列出对应的插入版本来源。
+- 边界插入（只沾特征一侧）与外部插入不归入特征：insertion_impact.attributed=false、inserted_sources 为空，之后的旋转或删除也不会把这些碱基带进特征。
 - `bioseq chain-undo <project> <chain_id>` 撤回末次编辑（丢弃最后一个版本）并写回。
-- `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的坐标，不一致时列出差异。
+- `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的全部原子（原始位置 + 各版本插入的碱基），不一致时列出差异。
 - 保存重开后段来源与插入归属保持不变，trace 与 verify 结果与重开前一致。
