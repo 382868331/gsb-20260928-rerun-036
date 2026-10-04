@@ -188,7 +188,9 @@ def direct_position_map(chain, target_version):
 
 def verify_chain(chain):
     mismatches = []
-    for index in range(1, len(chain["versions"])):
+    insertion_mismatches = []
+    normalized = _normalize_provenance(chain)
+    for index in range(1, len(normalized["versions"])):
         direct = direct_position_map(chain, index)
         composed = composed_position_map(chain, index)
         if direct != composed:
@@ -200,22 +202,76 @@ def verify_chain(chain):
                         "direct": direct.get(source),
                         "composed": composed.get(source),
                     })
+    length = len(normalized["versions"][0]["sequence"])
+    carried_inserted = []
+    for version in normalized["versions"][1:]:
+        index = version["index"]
+        edit = version["edit"]
+        forward_direct, new_length = _edit_transform(edit, length)
+        forward_composed = _step_forward_map(version)
+        carried_inserted = [
+            (label, forward_direct.get(direct), forward_composed.get(composed))
+            for label, direct, composed in carried_inserted
+        ]
+        if edit["kind"] == INSERT:
+            after = edit["after_position"]
+            for offset in range(len(edit["bases"])):
+                expected = {"kind": "inserted", "edit_version": index, "offset": offset}
+                actual = version["provenance"][after + offset]
+                if actual != expected:
+                    insertion_mismatches.append({
+                        "version": index,
+                        "inserted_offset": offset,
+                        "expected": expected,
+                        "actual": actual,
+                    })
+                position = after + 1 + offset
+                carried_inserted.append(
+                    ("inserted:%d:%d" % (index, offset), position, position)
+                )
+        length = new_length
+        for label, direct, composed in carried_inserted:
+            if direct != composed:
+                insertion_mismatches.append({
+                    "version": index,
+                    "source_position": label,
+                    "direct": direct,
+                    "composed": composed,
+                })
     return {
         "chain_id": chain["id"],
         "checked_versions": len(chain["versions"]) - 1,
-        "consistent": not mismatches,
+        "consistent": not mismatches and not insertion_mismatches,
         "mismatches": mismatches,
+        "insertion_mismatches": insertion_mismatches,
+    }
+
+
+def _element_provenance(element):
+    if element["kind"] == "origin":
+        return {"kind": "origin", "position": element["position"]}
+    return {
+        "kind": "inserted",
+        "edit_version": element["edit_version"],
+        "offset": element["offset"],
     }
 
 
 def _segments(ordered_pairs, length):
     segments = []
-    for source, mapped in ordered_pairs:
+    for element, mapped in ordered_pairs:
+        provenance = _element_provenance(element)
+        source = element["position"] if element["kind"] == "origin" else None
         if segments and mapped == segments[-1]["positions"][-1] % length + 1:
             segments[-1]["positions"].append(mapped)
             segments[-1]["source_positions"].append(source)
+            segments[-1]["provenance"].append(provenance)
         else:
-            segments.append({"positions": [mapped], "source_positions": [source]})
+            segments.append({
+                "positions": [mapped],
+                "source_positions": [source],
+                "provenance": [provenance],
+            })
     for segment in segments:
         segment["start"] = segment["positions"][0]
         segment["end"] = segment["positions"][-1]
@@ -235,15 +291,6 @@ def _insertion_impact(positions, edit, length):
     return "outside"
 
 
-def _positions_at(chain, version_index):
-    initial = len(chain["versions"][0]["sequence"])
-    current = list(range(1, initial + 1))
-    for version in chain["versions"][1 : version_index + 1]:
-        forward = _step_forward_map(version)
-        current = [forward.get(position) for position in current]
-    return current
-
-
 def trace_feature(chain, feature, through_version=None):
     chain = _normalize_provenance(chain)
     versions = chain["versions"]
@@ -253,48 +300,72 @@ def trace_feature(chain, feature, through_version=None):
         raise IndexError("version %d out of range" % through_version)
 
     ordered_sources = list(feature.positions(len(versions[0]["sequence"])))
+    elements = [{"kind": "origin", "position": source} for source in ordered_sources]
+    current = list(ordered_sources)
     snapshots = []
 
     for index, version in enumerate(versions):
+        if index > through_version:
+            break
         length = len(version["sequence"])
-        current = _positions_at(chain, index)
-        mapped_sources = [current[source - 1] for source in ordered_sources]
+        edit = version["edit"]
+        insertion_impact = None
+        if index > 0:
+            forward = _step_forward_map(version)
+            previous = current
+            current = [forward.get(position) if position is not None else None for position in previous]
+            if edit["kind"] == INSERT:
+                present = {position for position in previous if position is not None}
+                location = _insertion_impact(present, edit, len(versions[index - 1]["sequence"]))
+                insertion_impact = {"edit": edit, "location": location}
+                if location == "internal":
+                    after = edit["after_position"]
+                    count = len(edit["bases"])
+                    anchor = next(
+                        i for i, position in enumerate(previous) if position == after
+                    )
+                    new_elements = [
+                        {"kind": "inserted", "edit_version": index, "offset": offset}
+                        for offset in range(count)
+                    ]
+                    elements[anchor + 1 : anchor + 1] = new_elements
+                    current[anchor + 1 : anchor + 1] = [
+                        after + 1 + offset for offset in range(count)
+                    ]
         pairs = [
-            (source, mapped)
-            for source, mapped in zip(ordered_sources, mapped_sources)
+            (element, mapped)
+            for element, mapped in zip(elements, current)
             if mapped is not None
         ]
         deleted_sources = [
-            source for source, mapped in zip(ordered_sources, mapped_sources) if mapped is None
+            element["position"]
+            for element, mapped in zip(elements, current)
+            if mapped is None and element["kind"] == "origin"
         ]
-        if not deleted_sources:
+        deleted_insertions = [
+            _element_provenance(element)
+            for element, mapped in zip(elements, current)
+            if mapped is None and element["kind"] == "inserted"
+        ]
+        if not deleted_sources and not deleted_insertions:
             status = "projected"
         elif pairs:
             status = "partially_deleted"
         else:
             status = "deleted"
-        edit = version["edit"]
-        insertion_impact = None
-        if edit and edit["kind"] == INSERT:
-            previous = _positions_at(chain, index - 1)
-            feature_previous = frozenset(
-                previous[source - 1]
-                for source in ordered_sources
-                if previous[source - 1] is not None
-            )
-            insertion_impact = {
-                "edit": edit,
-                "location": _insertion_impact(
-                    feature_previous, edit, len(versions[index - 1]["sequence"])
-                ),
-            }
         snapshots.append({
             "version": index,
             "sequence_length": length,
             "status": status,
             "positions": tuple(mapped for _, mapped in pairs),
+            "inserted_positions": tuple(
+                mapped
+                for element, mapped in pairs
+                if element["kind"] == "inserted"
+            ),
             "segments": _segments(pairs, length),
             "deleted_source_positions": tuple(deleted_sources),
+            "deleted_insertions": tuple(deleted_insertions),
             "edit": edit,
             "insertion_impact": insertion_impact,
         })
@@ -309,7 +380,7 @@ def trace_feature(chain, feature, through_version=None):
         "feature_wraps_origin": feature.wraps_origin,
         "source_positions": tuple(ordered_sources),
         "through_version": through_version,
-        "versions": snapshots[: through_version + 1],
+        "versions": snapshots,
     }
 
 

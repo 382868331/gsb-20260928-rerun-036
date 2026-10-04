@@ -121,6 +121,110 @@ class TraceTest(unittest.TestCase):
         self.assertEqual(v1["positions"], (1, 2, 3))
 
 
+class InsertedFragmentTrackingTest(unittest.TestCase):
+    def build_full_chain(self):
+        chain = versioning.create_chain("ref-x", REFERENCE, chain_id="chain-i")
+        chain = versioning.rotate(chain, 4)                    # v1
+        chain = versioning.delete(chain, 8, 9)                 # v2: partial deletion
+        chain = versioning.insert(chain, 7, "GG")              # v3: internal insertion
+        chain = versioning.rotate(chain, 3)                    # v4: rotate again
+        chain = versioning.delete(chain, 5, 6)                 # v5: delete inserted bases
+        return chain
+
+    def test_internal_insertion_joins_feature_and_rotates_along(self):
+        trace = versioning.trace_feature(self.build_full_chain(), make_feature())
+        v3 = trace["versions"][3]
+        self.assertEqual(v3["insertion_impact"]["location"], "internal")
+        self.assertEqual(v3["positions"], (6, 7, 8, 9, 10, 11))
+        self.assertEqual(v3["inserted_positions"], (8, 9))
+        provenance = [p for s in v3["segments"] for p in s["provenance"]]
+        self.assertEqual(provenance[2:4], [
+            {"kind": "inserted", "edit_version": 3, "offset": 0},
+            {"kind": "inserted", "edit_version": 3, "offset": 1},
+        ])
+        self.assertEqual(provenance[0], {"kind": "origin", "position": 10})
+        self.assertIsNone(v3["segments"][0]["source_positions"][2])
+
+        v4 = trace["versions"][4]
+        self.assertEqual(v4["status"], "partially_deleted")
+        self.assertEqual(v4["deleted_source_positions"], (12, 1))
+        self.assertEqual(v4["deleted_insertions"], ())
+        self.assertEqual(v4["positions"], (3, 4, 5, 6, 7, 8))
+        self.assertEqual(v4["inserted_positions"], (5, 6))
+        provenance = [p for s in v4["segments"] for p in s["provenance"]]
+        self.assertEqual(provenance[2], {"kind": "inserted", "edit_version": 3, "offset": 0})
+        self.assertEqual([s["positions"] for s in v4["segments"]], [[3, 4, 5, 6, 7, 8]])
+
+    def test_later_deletion_of_inserted_bases_is_traced(self):
+        trace = versioning.trace_feature(self.build_full_chain(), make_feature())
+        v5 = trace["versions"][5]
+        self.assertEqual(v5["status"], "partially_deleted")
+        self.assertEqual(v5["positions"], (3, 4, 5, 6))
+        self.assertEqual(v5["inserted_positions"], ())
+        self.assertEqual(v5["deleted_insertions"], (
+            {"kind": "inserted", "edit_version": 3, "offset": 0},
+            {"kind": "inserted", "edit_version": 3, "offset": 1},
+        ))
+        self.assertEqual(v5["deleted_source_positions"], (12, 1))
+
+    def test_boundary_insertion_not_attributed(self):
+        chain = versioning.create_chain("ref-x", REFERENCE)
+        chain = versioning.rotate(chain, 4)
+        chain = versioning.delete(chain, 8, 9)
+        chain = versioning.insert(chain, 9, "GG")              # boundary
+        chain = versioning.rotate(chain, 2)
+        trace = versioning.trace_feature(chain, make_feature())
+        v3 = trace["versions"][3]
+        self.assertEqual(v3["insertion_impact"]["location"], "boundary")
+        self.assertEqual(v3["inserted_positions"], ())
+        self.assertEqual(v3["positions"], (6, 7, 8, 9))
+        v4 = trace["versions"][4]
+        self.assertEqual(v4["inserted_positions"], ())
+        self.assertEqual(v4["positions"], (4, 5, 6, 7))
+        provenance = [p for s in v4["segments"] for p in s["provenance"]]
+        self.assertTrue(all(p["kind"] == "origin" for p in provenance))
+
+    def test_verify_covers_inserted_provenance(self):
+        chain = self.build_full_chain()
+        report = versioning.verify_chain(chain)
+        self.assertTrue(report["consistent"], report)
+        chain["versions"][3]["provenance"][7] = {"kind": "inserted", "edit_version": 3, "offset": 1}
+        report = versioning.verify_chain(chain)
+        self.assertFalse(report["consistent"])
+        self.assertTrue(report["insertion_mismatches"])
+
+    def test_save_reopen_and_undo_preserve_insertion_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ProjectStore(Path(tmp) / "proj")
+            store.initialize()
+            store.add_reference(REFERENCE, reference_id="ref-x")
+            store.add_feature("ref-x", name="wrap", start=10, end=3, strand="-")
+            store.create_chain("ref-x", "chain-i")
+            store.update_chain("chain-i", "rotate", offset=4)
+            store.update_chain("chain-i", "delete", start=8, end=9)
+            store.update_chain("chain-i", "insert", after_position=7, bases="GG")
+            store.update_chain("chain-i", "rotate", offset=3)
+            chain = store.update_chain("chain-i", "delete", start=5, end=6)
+
+            reopened = ProjectStore(Path(tmp) / "proj")
+            loaded = reopened.get_chain("chain-i")
+            feature = reopened.get_features("ref-x")[0]
+            self.assertEqual(
+                versioning.trace_feature(loaded, feature),
+                versioning.trace_feature(chain, feature),
+            )
+            trace = versioning.trace_feature(loaded, feature)
+            self.assertEqual(trace["versions"][4]["inserted_positions"], (5, 6))
+            self.assertTrue(versioning.verify_chain(loaded)["consistent"])
+
+            undone = reopened.update_chain("chain-i", "undo")
+            self.assertEqual(len(undone["versions"]), 5)
+            restored = versioning.trace_feature(reopened.get_chain("chain-i"), feature)
+            self.assertEqual(restored["versions"], trace["versions"][:5])
+            self.assertEqual(restored["versions"][4]["inserted_positions"], (5, 6))
+            self.assertEqual(restored["versions"][4]["deleted_insertions"], ())
+
+
 class VerifyTest(unittest.TestCase):
     def test_direct_matches_composed(self):
         chain = build_chain()

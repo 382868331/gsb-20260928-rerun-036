@@ -68,6 +68,8 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - `bioseq chain-create <project> <reference_id> [--chain-id ID]` 以原始参考为第 0 版建立连续版本链，保存在 `chains/` 下。
 - `bioseq chain-edit <project> <chain_id> rotate|delete|insert ...` 追加一个新版本：先旋转（`--offset`）再删除（`--start/--end`）或插入（`--after/--bases`），每个版本记录逐位置来源（carried 指向上一版本坐标，inserted 标记产生它的编辑版本与偏移）。
 - `bioseq chain-trace <project> <chain_id> <feature_id> [--version K]` 把原始参考上的有方向特征（允许 `start > end` 跨起点）追到新链的每个中间版本：输出保留原特征定义与分段顺序（`segments` 按特征方向排列，含每段来源坐标），不是排序位置集合；部分删除标记 `partially_deleted` 并列出 `deleted_source_positions`，整体删除明确标记 `deleted`；插入编辑附带 `insertion_impact`（internal/boundary/outside，沿用边界插入归属规则）。`--version K` 只导出到第 K 版的中间映射。
+- 判定为 `internal` 的插入片段从插入版本起并入特征元素序列，在后续旋转/删除中继续参与映射：每个分段位置带 `provenance`，区分 `origin`（原始参考坐标）与 `inserted`（产生它的 `edit_version` 与 `offset`），快照另给出 `inserted_positions`；`boundary`/`outside` 插入不会并入特征。后续删除删掉已归属插入碱基时，列入 `deleted_insertions` 并计入 `partially_deleted`。
+- `bioseq chain-verify` 除原始坐标外，还核对每个插入碱基的 provenance 记录（`edit_version`/`offset` 与插入位置）及其在后续版本中的携带映射，不一致时列入 `insertion_mismatches`。
 - `bioseq chain-undo <project> <chain_id>` 撤回末次编辑（丢弃最后一个版本）并写回。
 - `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的坐标，不一致时列出差异。
 - 保存重开后段来源与插入归属保持不变，trace 与 verify 结果与重开前一致。
