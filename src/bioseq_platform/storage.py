@@ -16,6 +16,7 @@ from .io import (
 from .models import AlignmentParameters, InvalidRecord, Reference, SequenceRecord, SequenceResult
 from .features import Feature
 from .validation import normalize_sequence
+from . import versioning
 
 
 class ProjectStore:
@@ -26,9 +27,10 @@ class ProjectStore:
         self.parameters_dir = self.root / "parameters"
         self.runs_dir = self.root / "runs"
         self.features_dir = self.root / "features"
+        self.chains_dir = self.root / "chains"
 
     def initialize(self) -> None:
-        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.features_dir]:
+        for directory in [self.root, self.references_dir, self.datasets_dir, self.parameters_dir, self.runs_dir, self.features_dir, self.chains_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         manifest = self.root / "project.json"
         if not manifest.exists():
@@ -132,3 +134,32 @@ class ProjectStore:
         if not self.run_exists(run_id):
             raise KeyError(f"unknown run: {run_id}")
         atomic_write_json(self.run_path(run_id) / "results.json", dataclass_list(results))
+
+    def _chain_path(self, chain_id: str) -> Path:
+        return self.chains_dir / f"{chain_id}.json"
+
+    def chain_exists(self, chain_id: str) -> bool:
+        return self._chain_path(chain_id).exists()
+
+    def save_chain(self, chain: dict) -> None:
+        atomic_write_json(self._chain_path(chain["id"]), chain)
+
+    def get_chain(self, chain_id: str) -> dict:
+        path = self._chain_path(chain_id)
+        if not path.exists():
+            raise KeyError(f"unknown chain: {chain_id}")
+        return read_json(path)
+
+    def create_chain(self, reference_id: str, chain_id: str | None = None) -> dict:
+        reference = self.get_reference(reference_id)
+        chain = versioning.create_chain(reference.id, reference.sequence, chain_id)
+        if self.chain_exists(chain["id"]):
+            raise ValueError(f"chain already exists: {chain['id']}")
+        self.save_chain(chain)
+        return chain
+
+    def update_chain(self, chain_id: str, operation: str, **kwargs) -> dict:
+        chain = self.get_chain(chain_id)
+        chain = versioning.apply_operation(chain, operation, **kwargs)
+        self.save_chain(chain)
+        return chain

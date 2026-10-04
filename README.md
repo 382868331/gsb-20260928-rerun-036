@@ -62,3 +62,12 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - 变异归属规则：替换按参考位置判定；缺失与功能区有交集即报告，`covers_feature` 标记是否覆盖整个功能区——覆盖时功能区状态为 `deleted`，不再有对应查询范围；插入 `after_position=p` 仅当 p 与 p+1（环状意义下）都在区间内时记为 `internal`，只沾一边记为 `boundary`，因此边界插入不会在相邻两个功能区里都被算成完整内部变异。
 - 反向互补解释下，投影坐标、方向和区间先后关系都回映到原始输入序列（`query_strand=reverse`，坐标为原始查询坐标）。
 - 改选解释前可用 `bioseq select ... --preview` 查看哪些功能区的投影需要重算（`features_to_recompute`）；正式 `select` 的输出也带 `features_recomputed`。功能区注释按 `reference_id` 保存在 `features/` 下，与批次结果相互独立，改选后旧投影仍可按候选索引重现比较。
+
+## 参考版本链与特征追踪
+
+- `bioseq chain-create <project> <reference_id> [--chain-id ID]` 以原始参考为第 0 版建立连续版本链，保存在 `chains/` 下。
+- `bioseq chain-edit <project> <chain_id> rotate|delete|insert ...` 追加一个新版本：先旋转（`--offset`）再删除（`--start/--end`）或插入（`--after/--bases`），每个版本记录逐位置来源（carried 指向上一版本坐标，inserted 标记产生它的编辑版本与偏移）。
+- `bioseq chain-trace <project> <chain_id> <feature_id> [--version K]` 把原始参考上的有方向特征（允许 `start > end` 跨起点）追到新链的每个中间版本：输出保留原特征定义与分段顺序（`segments` 按特征方向排列，含每段来源坐标），不是排序位置集合；部分删除标记 `partially_deleted` 并列出 `deleted_source_positions`，整体删除明确标记 `deleted`；插入编辑附带 `insertion_impact`（internal/boundary/outside，沿用边界插入归属规则）。`--version K` 只导出到第 K 版的中间映射。
+- `bioseq chain-undo <project> <chain_id>` 撤回末次编辑（丢弃最后一个版本）并写回。
+- `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的坐标，不一致时列出差异。
+- 保存重开后段来源与插入归属保持不变，trace 与 verify 结果与重开前一致。

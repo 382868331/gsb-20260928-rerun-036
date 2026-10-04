@@ -13,6 +13,7 @@ from .pipeline import (
     selection_projection_diff,
 )
 from .storage import ProjectStore
+from . import versioning
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,6 +59,31 @@ def build_parser() -> argparse.ArgumentParser:
     project_parser.add_argument("run_id", help="run identifier")
     project_parser.add_argument("record_id", help="record identifier within the run")
     project_parser.add_argument("--index", type=int, default=None, help="restrict to one 0-based candidate index")
+
+    chain_create = subparsers.add_parser("chain-create", help="start a reference version chain")
+    chain_create.add_argument("project", help="project directory")
+    chain_create.add_argument("reference_id", help="reference identifier for version 0")
+    chain_create.add_argument("--chain-id", default=None, help="explicit chain identifier")
+    chain_edit = subparsers.add_parser("chain-edit", help="apply a rotate/delete/insert edit as a new version")
+    chain_edit.add_argument("project", help="project directory")
+    chain_edit.add_argument("chain_id", help="chain identifier")
+    chain_edit.add_argument("operation", choices=["rotate", "delete", "insert"])
+    chain_edit.add_argument("--offset", type=int, default=None, help="rotation offset (rotate)")
+    chain_edit.add_argument("--start", type=int, default=None, help="1-based deletion start (delete)")
+    chain_edit.add_argument("--end", type=int, default=None, help="1-based deletion end (delete)")
+    chain_edit.add_argument("--after", type=int, default=None, help="insert after this position; 0 = before first (insert)")
+    chain_edit.add_argument("--bases", default=None, help="inserted bases (insert)")
+    chain_undo = subparsers.add_parser("chain-undo", help="withdraw the last edit (drop the last version)")
+    chain_undo.add_argument("project", help="project directory")
+    chain_undo.add_argument("chain_id", help="chain identifier")
+    chain_trace = subparsers.add_parser("chain-trace", help="export feature mapping at every intermediate version")
+    chain_trace.add_argument("project", help="project directory")
+    chain_trace.add_argument("chain_id", help="chain identifier")
+    chain_trace.add_argument("feature_id", help="feature annotated on the original reference")
+    chain_trace.add_argument("--version", type=int, default=None, help="stop tracing at this version index")
+    chain_verify = subparsers.add_parser("chain-verify", help="check direct mapping against per-version composition")
+    chain_verify.add_argument("project", help="project directory")
+    chain_verify.add_argument("chain_id", help="chain identifier")
     return parser
 
 
@@ -127,6 +153,53 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "project":
         print(json.dumps(project_run_record(store, args.run_id, args.record_id, args.index), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "chain-create":
+        store.initialize()
+        chain = store.create_chain(args.reference_id, args.chain_id)
+        print(json.dumps({"chain_id": chain["id"], "versions": len(chain["versions"])}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "chain-edit":
+        kwargs = {}
+        if args.operation == "rotate":
+            if args.offset is None:
+                raise SystemExit("chain-edit rotate requires --offset")
+            kwargs["offset"] = args.offset
+        elif args.operation == "delete":
+            if args.start is None or args.end is None:
+                raise SystemExit("chain-edit delete requires --start and --end")
+            kwargs["start"], kwargs["end"] = args.start, args.end
+        elif args.operation == "insert":
+            if args.after is None or args.bases is None:
+                raise SystemExit("chain-edit insert requires --after and --bases")
+            kwargs["after_position"], kwargs["bases"] = args.after, args.bases
+        chain = store.update_chain(args.chain_id, args.operation, **kwargs)
+        print(json.dumps({
+            "chain_id": chain["id"],
+            "versions": len(chain["versions"]),
+            "edit": chain["versions"][-1]["edit"],
+            "sequence": chain["versions"][-1]["sequence"],
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "chain-undo":
+        chain = store.update_chain(args.chain_id, "undo")
+        print(json.dumps({
+            "chain_id": chain["id"],
+            "versions": len(chain["versions"]),
+            "sequence": chain["versions"][-1]["sequence"],
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "chain-trace":
+        chain = store.get_chain(args.chain_id)
+        features = {feature.id: feature for feature in store.get_features(chain["reference_id"])}
+        if args.feature_id not in features:
+            raise SystemExit(f"unknown feature for reference {chain['reference_id']}: {args.feature_id}")
+        trace = versioning.trace_feature(chain, features[args.feature_id], args.version)
+        print(json.dumps(trace, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "chain-verify":
+        print(json.dumps(versioning.verify_chain(store.get_chain(args.chain_id)), ensure_ascii=False, indent=2))
         return 0
     return 2
 
