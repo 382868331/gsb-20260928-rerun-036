@@ -73,3 +73,11 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - `bioseq chain-undo <project> <chain_id>` 撤回末次编辑（丢弃最后一个版本）并写回。
 - `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的全部原子（原始位置 + 各版本插入的碱基），不一致时列出差异。
 - 保存重开后段来源与插入归属保持不变，trace 与 verify 结果与重开前一致。
+
+## 候选编辑的兼容组合研究
+
+- `bioseq combo-study <project> <chain_id> --candidates edits.json [--keep feat1,feat2] [--allow 3:5,10:2] [--base-version K]`：以链上某版本（默认最新）为基准，评估一组候选编辑（rotate/delete/insert，坐标均为基准版本坐标）能否共同应用。
+- 保留特征（`--keep`，默认全部）按特征方向与分段顺序（`chain-trace` 的 sources/segments）参与约束：删除或内部/边界插入落在保留特征上即违规，除非受影响位置全部落在 `--allow` 允许破坏的范围内（范围支持 start > end 跨起点）。违规报告列出按特征方向排列的实际受影响来源（origin 位置或 inserted 的 edit_version/offset），相同碱基的不同版本插入不会被当作同一来源。
+- 冲突按原子来源判定而非登记顺序：删除与插入冲突（插入锚点原子被删除，`insert_anchor_deleted`）、删除与旋转冲突（旋转起点原子被删除，`rotation_start_deleted`）都会指出实际受影响的来源；重叠或相邻的删除范围自动合并（共享删除范围），同一锚点的多个插入按候选 id 顺序连续插入，多个旋转的偏移量可叠加。
+- 系统枚举满足约束的全部组合，按“应用候选数最多、改动最少（删除原子数 + 插入碱基数）”排序，`best` 为首选组合。
+- `bioseq combo-confirm <project> <chain_id> --candidates edits.json --select id1,id2 [--new-chain-id ID]`：确认某个兼容组合后形成独立版本链（复制基准版本后依次应用合并删除、连续插入、旋转，每步按原子来源重定位坐标），原链保持不变；输出最终序列、`chain-verify` 一致性结果和保留特征在新链末版的归属（方向、分段顺序、删除来源），可用共享删除范围、反向特征和连续插入验证。

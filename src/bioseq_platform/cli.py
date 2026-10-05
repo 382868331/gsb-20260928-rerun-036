@@ -13,7 +13,28 @@ from .pipeline import (
     selection_projection_diff,
 )
 from .storage import ProjectStore
-from . import versioning
+from . import combination, versioning
+
+
+def _parse_ranges(text):
+    ranges = []
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        start, end = item.split(":")
+        ranges.append((int(start), int(end)))
+    return ranges
+
+
+def _combo_inputs(args):
+    with open(args.candidates, "r", encoding="utf-8") as handle:
+        candidates = json.load(handle)
+    keep = None
+    if args.keep:
+        keep = [item.strip() for item in args.keep.split(",") if item.strip()]
+    ranges = _parse_ranges(args.allow) if args.allow else []
+    return candidates, keep, ranges
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +105,22 @@ def build_parser() -> argparse.ArgumentParser:
     chain_verify = subparsers.add_parser("chain-verify", help="check direct mapping against per-version composition")
     chain_verify.add_argument("project", help="project directory")
     chain_verify.add_argument("chain_id", help="chain identifier")
+    combo_study = subparsers.add_parser("combo-study", help="study compatible combinations of candidate edits")
+    combo_study.add_argument("project", help="project directory")
+    combo_study.add_argument("chain_id", help="base chain identifier")
+    combo_study.add_argument("--candidates", required=True, help="JSON file with candidate edits")
+    combo_study.add_argument("--keep", default=None, help="comma-separated feature ids to keep (default: all)")
+    combo_study.add_argument("--allow", default=None, help="comma-separated start:end ranges where disruption is allowed")
+    combo_study.add_argument("--base-version", type=int, default=None, help="base version index (default: latest)")
+    combo_confirm = subparsers.add_parser("combo-confirm", help="apply a chosen combination as an independent chain")
+    combo_confirm.add_argument("project", help="project directory")
+    combo_confirm.add_argument("chain_id", help="base chain identifier")
+    combo_confirm.add_argument("--candidates", required=True, help="JSON file with candidate edits")
+    combo_confirm.add_argument("--select", required=True, help="comma-separated candidate ids to apply")
+    combo_confirm.add_argument("--keep", default=None, help="comma-separated feature ids to keep (default: all)")
+    combo_confirm.add_argument("--allow", default=None, help="comma-separated start:end ranges where disruption is allowed")
+    combo_confirm.add_argument("--base-version", type=int, default=None, help="base version index (default: latest)")
+    combo_confirm.add_argument("--new-chain-id", default=None, help="identifier for the resulting chain")
     return parser
 
 
@@ -200,6 +237,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "chain-verify":
         print(json.dumps(versioning.verify_chain(store.get_chain(args.chain_id)), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "combo-study":
+        chain = store.get_chain(args.chain_id)
+        features = store.get_features(chain["reference_id"])
+        candidates, keep, ranges = _combo_inputs(args)
+        study = combination.study_combinations(
+            chain, features, keep, ranges, candidates, args.base_version
+        )
+        print(json.dumps(study, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "combo-confirm":
+        chain = store.get_chain(args.chain_id)
+        features = store.get_features(chain["reference_id"])
+        candidates, keep, ranges = _combo_inputs(args)
+        selected = [item.strip() for item in args.select.split(",") if item.strip()]
+        result = combination.confirm_combination(
+            chain, features, keep, ranges, candidates, selected,
+            new_chain_id=args.new_chain_id, base_version=args.base_version,
+        )
+        if store.chain_exists(result["new_chain_id"]):
+            raise SystemExit(f"chain already exists: {result['new_chain_id']}")
+        store.save_chain(result.pop("chain"))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     return 2
 
