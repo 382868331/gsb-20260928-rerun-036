@@ -69,10 +69,10 @@ class TraceTest(unittest.TestCase):
         self.assertEqual(trace["feature_strand"], "-")
         self.assertTrue(trace["feature_wraps_origin"])
         v0 = trace["versions"][0]
-        self.assertEqual(v0["positions"], (10, 11, 12, 1, 2, 3))
+        self.assertEqual(v0["positions"], (3, 2, 1, 12, 11, 10))
         self.assertNotEqual(v0["positions"], tuple(sorted(v0["positions"])))
-        self.assertEqual([s["positions"] for s in v0["segments"]], [[10, 11, 12, 1, 2, 3]])
-        self.assertEqual([s["source_positions"] for s in v0["segments"]], [[10, 11, 12, 1, 2, 3]])
+        self.assertEqual([s["positions"] for s in v0["segments"]], [[3, 2, 1, 12, 11, 10]])
+        self.assertEqual([s["source_positions"] for s in v0["segments"]], [[3, 2, 1, 12, 11, 10]])
         self.assertTrue(v0["segments"][0]["wraps_origin"])
 
     def test_intermediate_versions(self):
@@ -80,16 +80,16 @@ class TraceTest(unittest.TestCase):
         self.assertEqual([v["version"] for v in trace["versions"]], [0, 1, 2, 3])
         v1 = trace["versions"][1]
         self.assertEqual(v1["status"], "projected")
-        self.assertEqual(v1["positions"], (6, 7, 8, 9, 10, 11))
+        self.assertEqual(v1["positions"], (11, 10, 9, 8, 7, 6))
         self.assertEqual(len(v1["segments"]), 1)
         v2 = trace["versions"][2]
         self.assertEqual(v2["status"], "partially_deleted")
-        self.assertEqual(v2["positions"], (6, 7, 8, 9))
-        self.assertEqual(v2["deleted_source_positions"], (12, 1))
-        self.assertEqual(v2["segments"][0]["source_positions"], [10, 11, 2, 3])
+        self.assertEqual(v2["positions"], (9, 8, 7, 6))
+        self.assertEqual(v2["deleted_source_positions"], (1, 12))
+        self.assertEqual(v2["segments"][0]["source_positions"], [3, 2, 11, 10])
         v3 = trace["versions"][3]
         self.assertEqual(v3["status"], "partially_deleted")
-        self.assertEqual(v3["positions"], (6, 7, 8, 9))
+        self.assertEqual(v3["positions"], (9, 8, 7, 6))
         self.assertEqual(v3["insertion_impact"]["location"], "boundary")
         self.assertEqual(v3["insertion_impact"]["edit"]["after_position"], 9)
 
@@ -115,10 +115,10 @@ class TraceTest(unittest.TestCase):
         self.assertEqual(v2["status"], "deleted")
         self.assertEqual(v2["positions"], ())
         self.assertEqual(v2["segments"], [])
-        self.assertEqual(v2["deleted_source_positions"], (10, 11, 12, 1, 2, 3))
+        self.assertEqual(v2["deleted_source_positions"], (3, 2, 1, 12, 11, 10))
         v1 = trace["versions"][1]
         self.assertEqual(v1["status"], "partially_deleted")
-        self.assertEqual(v1["positions"], (1, 2, 3))
+        self.assertEqual(v1["positions"], (3, 2, 1))
 
 
 class InsertedMemberPersistenceTest(unittest.TestCase):
@@ -136,30 +136,30 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
         v3 = trace["versions"][3]
         self.assertEqual(v3["insertion_impact"]["location"], "internal")
         self.assertTrue(v3["insertion_impact"]["attributed"])
-        self.assertEqual(v3["positions"], (6, 7, 8, 9, 10, 11, 12))
+        self.assertEqual(v3["positions"], (12, 11, 10, 9, 8, 7, 6))
         inserted_sources = [
             source for source in v3["sources"] if source["kind"] == "inserted"
         ]
         self.assertEqual(inserted_sources, [
-            {"kind": "inserted", "edit_version": 3, "offset": 0},
             {"kind": "inserted", "edit_version": 3, "offset": 1},
+            {"kind": "inserted", "edit_version": 3, "offset": 0},
         ])
         self.assertEqual(
             [s["kind"] for s in v3["segments"][0]["sources"]],
-            ["origin", "inserted", "inserted", "origin", "origin", "origin", "origin"],
+            ["origin", "origin", "origin", "origin", "inserted", "inserted", "origin"],
         )
-        self.assertEqual(v3["segments"][0]["source_positions"], [10, None, None, 11, 1, 2, 3])
+        self.assertEqual(v3["segments"][0]["source_positions"], [3, 2, 1, 11, None, None, 10])
         # the feature direction order is preserved across the insertion point
         self.assertEqual(
             [s.get("position") for s in v3["sources"]],
-            [10, None, None, 11, 1, 2, 3],
+            [3, 2, 1, 11, None, None, 10],
         )
 
         v4 = trace["versions"][4]
-        self.assertEqual(v4["positions"], (1, 2, 3, 4, 5, 6, 7))
+        self.assertEqual(v4["positions"], (7, 6, 5, 4, 3, 2, 1))
         self.assertEqual(
             [s["kind"] for s in v4["sources"]],
-            ["origin", "inserted", "inserted", "origin", "origin", "origin", "origin"],
+            ["origin", "origin", "origin", "origin", "inserted", "inserted", "origin"],
         )
         inserted_after_rotation = [
             source for source in v4["sources"] if source["kind"] == "inserted"
@@ -171,13 +171,13 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
     def test_deleting_inserted_bases_reports_inserted_deleted_sources(self):
         trace = versioning.trace_feature(self._build(), make_feature())
         v5 = trace["versions"][5]
-        self.assertEqual(v5["positions"], (1, 2, 3, 4, 5))
+        self.assertEqual(v5["positions"], (5, 4, 3, 2, 1))
         self.assertEqual(v5["status"], "partially_deleted")
-        self.assertEqual(v5["sources"][0], {"kind": "origin", "position": 10})
+        self.assertEqual(v5["sources"][0], {"kind": "origin", "position": 3})
         self.assertEqual(v5["deleted_sources"], (
-            {"kind": "inserted", "edit_version": 3, "offset": 0},
-            {"kind": "inserted", "edit_version": 3, "offset": 1},
             {"kind": "origin", "position": 12},
+            {"kind": "inserted", "edit_version": 3, "offset": 1},
+            {"kind": "inserted", "edit_version": 3, "offset": 0},
         ))
         self.assertEqual(v5["deleted_source_positions"], (12,))
         self.assertEqual(tuple(v5["segments"][0]["sources"]), v5["sources"])
@@ -193,14 +193,14 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
         self.assertFalse(impact["attributed"])
         self.assertEqual(impact["inserted_sources"], ())
         v3 = trace["versions"][3]
-        self.assertEqual(v3["positions"], (6, 7, 8, 9))
+        self.assertEqual(v3["positions"], (9, 8, 7, 6))
         self.assertTrue(
             all(source["kind"] == "origin" for source in v3["sources"])
         )
         # a later rotation still cannot pull the boundary bases into the feature
         chain = versioning.rotate(chain, 3)
         trace = versioning.trace_feature(chain, make_feature())
-        self.assertEqual(trace["versions"][4]["positions"], (3, 4, 5, 6))
+        self.assertEqual(trace["versions"][4]["positions"], (6, 5, 4, 3))
         self.assertTrue(
             all(s["kind"] == "origin" for s in trace["versions"][4]["sources"])
         )
@@ -212,7 +212,7 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
         impact = trace["versions"][1]["insertion_impact"]
         self.assertEqual(impact["location"], "outside")
         self.assertFalse(impact["attributed"])
-        self.assertEqual(trace["versions"][1]["positions"], (12, 13, 14, 1, 2, 3))
+        self.assertEqual(trace["versions"][1]["positions"], (3, 2, 1, 14, 13, 12))
 
     def test_atom_maps_cover_inserted_bases(self):
         chain = self._build()
@@ -245,7 +245,7 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
         v3 = trace["versions"][3]
         self.assertEqual(
             [s["kind"] for s in v3["sources"]],
-            ["origin", "inserted", "inserted", "origin", "origin", "origin", "origin"],
+            ["origin", "origin", "origin", "origin", "inserted", "inserted", "origin"],
         )
         chain = versioning.undo_last(chain)              # undo the internal insertion
         trace = versioning.trace_feature(chain, make_feature())
@@ -253,7 +253,7 @@ class InsertedMemberPersistenceTest(unittest.TestCase):
         self.assertTrue(
             all(s["kind"] == "origin" for s in latest["sources"])
         )
-        self.assertEqual(latest["positions"], (6, 7, 8, 9, 10))
+        self.assertEqual(latest["positions"], (10, 9, 8, 7, 6))
 
 
 class VerifyTest(unittest.TestCase):
@@ -287,6 +287,94 @@ class VerifyTest(unittest.TestCase):
         self.assertTrue(
             any(m.get("atom", {}).get("kind") == "inserted" for m in report["mismatches"])
         )
+
+
+class CandidateCombinationTest(unittest.TestCase):
+    def test_minimal_compatible_set_reports_sources_and_confirms_chain(self):
+        reference = "ACGTACGT"
+        chain = versioning.create_chain("ref-x", reference, chain_id="chain-base")
+        feature = Feature("feat-rev", "ref-x", "rev", start=4, end=2, strand="-")
+        candidates = [
+            {"id": "rot-a", "kind": "rotate", "offset": 1},
+            {"id": "rot-b", "kind": "rotate", "offset": 2},
+            {"id": "del-break", "kind": "delete", "start": 8, "end": 1},
+            {"id": "del-protected", "kind": "delete", "start": 2, "end": 2},
+            {"id": "ins-a", "kind": "insert", "after_position": 5, "bases": "G"},
+            {"id": "ins-b", "kind": "insert",
+             "after_source": {"kind": "origin", "position": 5}, "bases": "G"},
+        ]
+        plan = versioning.plan_edit_candidate_combination(
+            chain,
+            candidates,
+            [feature],
+            allowed_breaks={"feat-rev": {"start": 8, "end": 1}},
+        )
+        best = plan["best"]
+        self.assertEqual(
+            set(best["candidate_ids"]),
+            {"rot-a", "del-break", "ins-a", "ins-b"},
+        )
+        self.assertEqual(best["change_cost"]["deleted"], 2)
+        self.assertEqual(best["change_cost"]["inserted"], 2)
+        inserted = best["inserted_sources"]
+        self.assertEqual([atom["edit_version"] for atom in inserted], ["ins-a", "ins-b"])
+        self.assertTrue(all(atom["kind"] == "inserted" for atom in inserted))
+        self.assertTrue(any(item["type"] == "rotation_mismatch" for item in plan["conflicts"]))
+        protected = [
+            item for item in plan["conflicts"]
+            if item["type"] == "protected_feature_deletion"
+        ]
+        self.assertEqual(protected[0]["candidate_ids"], ("del-protected",))
+        self.assertEqual(protected[0]["affected_sources"], ({"kind": "origin", "position": 2},))
+
+        confirmed = versioning.apply_confirmed_edit_plan(chain, plan, "chain-confirmed")
+        self.assertEqual(confirmed["id"], "chain-confirmed")
+        self.assertEqual(confirmed["reference_id"], "ref-x")
+        self.assertEqual(confirmed["versions"][-1]["sequence"], "GTAGGCGC")
+        self.assertTrue(versioning.verify_chain(confirmed)["consistent"])
+        trace = versioning.trace_feature(confirmed, feature)
+        latest = trace["versions"][-1]
+        self.assertEqual(latest["deleted_source_positions"], (1, 8))
+        self.assertEqual(
+            [source["kind"] for source in latest["sources"]],
+            ["origin", "origin", "origin", "inserted", "inserted", "origin", "origin"],
+        )
+
+    def test_shared_deletion_and_inserted_source_are_order_independent(self):
+        reference = "ACGTACGT"
+        feature = Feature("feat", "ref-x", "f", start=2, end=6, strand="-")
+        candidates_one = [
+            {"id": "insert", "kind": "insert", "after_position": 3, "bases": "G"},
+            {"id": "delete-insert", "kind": "delete",
+             "deleted_sources": [{"kind": "inserted", "edit_version": "insert", "offset": 0}]},
+            {"id": "delete-one", "kind": "delete", "start": 4, "end": 4},
+            {"id": "delete-two", "kind": "delete", "start": 4, "end": 5},
+        ]
+        candidates_two = list(reversed(candidates_one))
+        chain = versioning.create_chain("ref-x", reference)
+        first = versioning.plan_edit_candidate_combination(
+            chain, candidates_one, [feature], allowed_breaks={"feat": True}
+        )
+        second = versioning.plan_edit_candidate_combination(
+            chain, candidates_two, [feature], allowed_breaks={"feat": True}
+        )
+        self.assertEqual(first["best"], second["best"])
+        shared_key = "('origin', 4)"
+        self.assertEqual(
+            first["best"]["deletion_candidates"][shared_key],
+            ("delete-one", "delete-two"),
+        )
+        confirmed = versioning.apply_confirmed_edit_plan(chain, first, "chain-shared")
+        self.assertTrue(versioning.verify_chain(confirmed)["consistent"])
+        trace = versioning.trace_feature(confirmed, feature)
+        self.assertEqual(trace["versions"][-1]["status"], "partially_deleted")
+        deleted_inserted = [
+            source for source in trace["versions"][-1]["deleted_sources"]
+            if source["kind"] == "inserted"
+        ]
+        self.assertEqual(deleted_inserted, [
+            {"kind": "inserted", "edit_version": "insert", "offset": 0}
+        ])
 
 
 class PersistenceTest(unittest.TestCase):
@@ -343,19 +431,19 @@ class PersistenceTest(unittest.TestCase):
                 ["origin"] * 5,
             )
             self.assertEqual(latest["deleted_sources"], (
-                {"kind": "inserted", "edit_version": 3, "offset": 0},
-                {"kind": "inserted", "edit_version": 3, "offset": 1},
                 {"kind": "origin", "position": 12},
+                {"kind": "inserted", "edit_version": 3, "offset": 1},
+                {"kind": "inserted", "edit_version": 3, "offset": 0},
             ))
             self.assertTrue(versioning.verify_chain(chain)["consistent"])
 
             undone = reopened.update_chain("chain-i", "undo")
             trace = versioning.trace_feature(undone, feature)
             restored = trace["versions"][-1]
-            self.assertEqual(restored["positions"], (1, 2, 3, 4, 5, 6, 7))
+            self.assertEqual(restored["positions"], (7, 6, 5, 4, 3, 2, 1))
             self.assertEqual(
                 [source["kind"] for source in restored["sources"]],
-                ["origin", "inserted", "inserted", "origin", "origin", "origin", "origin"],
+                ["origin", "origin", "origin", "origin", "inserted", "inserted", "origin"],
             )
             self.assertEqual(
                 [source["edit_version"] for source in restored["sources"] if source["kind"] == "inserted"],

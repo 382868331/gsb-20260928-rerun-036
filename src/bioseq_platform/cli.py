@@ -84,6 +84,13 @@ def build_parser() -> argparse.ArgumentParser:
     chain_verify = subparsers.add_parser("chain-verify", help="check direct mapping against per-version composition")
     chain_verify.add_argument("project", help="project directory")
     chain_verify.add_argument("chain_id", help="chain identifier")
+    chain_plan = subparsers.add_parser("chain-plan", help="compare compatible combinations of circular edit candidates")
+    chain_plan.add_argument("project", help="project directory")
+    chain_plan.add_argument("chain_id", help="source chain identifier")
+    chain_plan.add_argument("--candidates", required=True, help="JSON file containing rotate/delete/insert candidates")
+    chain_plan.add_argument("--features", default="", help="comma-separated feature ids to protect")
+    chain_plan.add_argument("--allowed-breaks", help="JSON object mapping feature id to permitted deletion ranges/sources")
+    chain_plan.add_argument("--confirm-chain-id", help="save the best feasible combination as this new independent chain")
     return parser
 
 
@@ -200,6 +207,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "chain-verify":
         print(json.dumps(versioning.verify_chain(store.get_chain(args.chain_id)), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "chain-plan":
+        chain = store.get_chain(args.chain_id)
+        features = store.get_features(chain["reference_id"])
+        if args.features:
+            wanted = {item.strip() for item in args.features.split(",") if item.strip()}
+            features = [feature for feature in features if feature.id in wanted]
+        with open(args.candidates, "r", encoding="utf-8") as handle:
+            candidates = json.load(handle)
+        allowed_breaks = None
+        if args.allowed_breaks:
+            with open(args.allowed_breaks, "r", encoding="utf-8") as handle:
+                allowed_breaks = json.load(handle)
+        plan = versioning.plan_edit_candidate_combination(
+            chain,
+            candidates,
+            features,
+            allowed_breaks=allowed_breaks,
+        )
+        if args.confirm_chain_id:
+            confirmed = store.confirm_edit_plan(args.chain_id, plan, args.confirm_chain_id)
+            plan = {**plan, "confirmed_chain_id": confirmed["id"]}
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
         return 0
     return 2
 

@@ -28,8 +28,10 @@ class Feature:
         if self.strand not in ("+", "-"):
             raise ValueError(f"feature {self.id} strand must be '+' or '-'")
         if self.start <= self.end:
-            return tuple(range(self.start, self.end + 1))
-        return tuple(range(self.start, reference_length + 1)) + tuple(range(1, self.end + 1))
+            forward = tuple(range(self.start, self.end + 1))
+        else:
+            forward = tuple(range(self.start, reference_length + 1)) + tuple(range(1, self.end + 1))
+        return forward
 
     def to_dict(self) -> dict:
         return {

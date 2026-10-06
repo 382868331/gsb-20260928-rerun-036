@@ -163,3 +163,11 @@ class ProjectStore:
         chain = versioning.apply_operation(chain, operation, **kwargs)
         self.save_chain(chain)
         return chain
+
+    def confirm_edit_plan(self, chain_id: str, plan: dict, new_chain_id: str) -> dict:
+        chain = self.get_chain(chain_id)
+        confirmed = versioning.apply_confirmed_edit_plan(chain, plan, new_chain_id)
+        if self.chain_exists(new_chain_id):
+            raise ValueError(f"chain already exists: {new_chain_id}")
+        self.save_chain(confirmed)
+        return confirmed

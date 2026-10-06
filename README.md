@@ -72,4 +72,7 @@ PYTHONPATH=src python -m bioseq_platform.cli init demo-project
 - 边界插入（只沾特征一侧）与外部插入不归入特征：insertion_impact.attributed=false、inserted_sources 为空，之后的旋转或删除也不会把这些碱基带进特征。
 - `bioseq chain-undo <project> <chain_id>` 撤回末次编辑（丢弃最后一个版本）并写回。
 - `bioseq chain-verify <project> <chain_id>` 用直接映射（编辑变换一次性组合）与逐版本来源组合核对每个版本的全部原子（原始位置 + 各版本插入的碱基），不一致时列出差异。
+- `bioseq chain-plan <project> <chain_id> --candidates edits.json [--features F1,F2] [--allowed-breaks breaks.json] [--confirm-chain-id ID]` 在环形原始坐标上研究多个旋转、删除和插入候选的可共同应用组合。候选必须有稳定 `id`；两个候选即使插入完全相同的碱基，`id`/offset 也代表不同插入来源。删除用 `start/end`（允许跨界）、`positions` 或 `deleted_sources` 指向 origin/inserted 原子；插入可用 `after_source` 指向插入版本来源。
+- 规划器枚举满足受保护有向特征及允许破坏范围的组合，优先保留最多候选，再比较删除和插入碱基数最少者；结果包含全部可行组合、共享删除范围的候选、连续插入位点，以及冲突的实际来源与候选。冲突判定只基于原子来源、旋转后的原始位置、特征方向和跨起点分段顺序，不依赖候选登记顺序。
+- 传入 `--confirm-chain-id` 后，最佳组合会从第 0 版重新生成独立版本链并保存；该链可继续用 `chain-trace` 检查反向/跨界特征归属，用 `chain-verify` 检查共享删除、插入来源和连续插入后的最终序列。
 - 保存重开后段来源与插入归属保持不变，trace 与 verify 结果与重开前一致。
